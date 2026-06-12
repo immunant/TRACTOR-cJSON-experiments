@@ -1,14 +1,14 @@
 # no_plan_3 CRISP run summary
 
-This summary covers the CRISP-level safety-loop attempts logged in `run_1.log` and `run_2.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
+This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, and `run_3.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
 
-- Total accepted edits: 40
+- Total accepted edits: 52
 - Total rejected edits: 0
-- Total tokens used: 3,834,155
+- Total tokens used: 5,049,047
 - Initial unsafe count: 1359
-- Final unsafe count after run 2: 510
-- Net unsafe operations removed by accepted edits: 849
-- Omitted from the table: trailing incomplete invocations starting at `run_1.log:241108` and `run_2.log:55326` appear incomplete in the logs.
+- Final unsafe count after run 3: 196
+- Net unsafe operations removed by accepted edits: 1163
+- Omitted from the table: trailing incomplete invocations starting at `run_1.log:241108`, `run_2.log:55326`, and `run_3.log:112395` appear incomplete in the logs.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---|---|
@@ -52,3 +52,15 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log` a
 | 38 | `run_2.log:34045` | 517 | -9 | 109,574 | Changed `get_array_item` to safe `Option<&cJSON>` input and `Option<NonNull<cJSON>>` output, and converted `cJSON_InsertItemInArray` / `cJSON_ReplaceItemInArray` implementations to safe reference signatures with FFI-boundary null/self guards. | accepted |
 | 39 | `run_2.log:42429` | 517 | 0 | 77,966 | Changed string/object/array reference constructors to return `Option<NonNull<cJSON>>` internally, with exported wrappers converting back to raw pointers. | accepted |
 | 40 | `run_2.log:47231` | 510 | -7 | 91,901 | Converted non-exported parse entry helpers `cJSON_ParseWithOpts` and `cJSON_ParseWithLengthOpts` from raw C pointer parameters to `Option<&CStr>` / `Option<&[c_uchar]>`, with exported wrappers handling raw conversion and `return_parse_end` writeback. | accepted |
+| 41 | `run_3.log:26` | 496 | -14 | 89,920 | Refactored the replace-item unit so non-exported implementation functions use `Option<NonNull<cJSON>>` and `Option<&CStr>` instead of raw pointer signatures; exported FFI entry points kept their ABI, and `cJSON_ReplaceItemInArray` no longer calls `cJSON_ReplaceItemViaPointer` through an unsafe call. | accepted |
+| 42 | `run_3.log:7304` | 470 | -26 | 85,385 | Made `cJSON_Duplicate` and `cJSON_Duplicate_rec` safe implementation functions using `Option<&cJSON>` and `Option<NonNull<cJSON>>`; recursive child duplication now reuses safe `add_item_to_array` instead of manually linking children. | accepted |
+| 43 | `run_3.log:14211` | 470 | 0 | 69,991 | Replaced direct function-pointer equality checks in hook initialization with `core::ptr::fn_addr_eq`, removing function-pointer comparison warnings without changing unsafe count. | accepted |
+| 44 | `run_3.log:19680` | 466 | -4 | 132,502 | Made `get_decimal_point` a safe Rust function that contains its `localeconv` access internally, and tightened `get_object_item` to return directly on match/failure instead of doing a final raw-pointer field check. | accepted |
+| 45 | `run_3.log:25739` | 465 | -1 | 111,142 | Removed translated C `memset` zeroing from the internal `print` implementation and dropped the unused `memset` FFI import because the `printbuffer` was already initialized equivalently. | accepted |
+| 46 | `run_3.log:32192` | 424 | -41 | 105,441 | Rewrote `print_string_ptr` to build escaped JSON strings with a safe `Vec<u8>` instead of raw pointer walking and C `strcpy`/`memcpy`/`sprintf`, preserving allocation-failure behavior with `try_reserve_exact`. | accepted |
+| 47 | `run_3.log:39629` | 379 | -45 | 83,896 | Replaced `parse_string`'s raw-pointer unsafe implementation with a safe `&mut cJSON` function using slice/index traversal, while keeping allocation through existing hooks and updating parser callers. | accepted |
+| 48 | `run_3.log:49576` | 358 | -21 | 131,701 | Changed `parse_number`, `parse_value`, `parse_array`, and `parse_object` to take `&mut cJSON` instead of raw pointers and removed their `unsafe fn` qualifiers; `parse_value` became fully safe. | accepted |
+| 49 | `run_3.log:61536` | 356 | -2 | 109,632 | Converted non-exported `cJSON_PrintBuffered` and `cJSON_PrintPreallocated` from raw-pointer APIs to safe signatures using `Option<&cJSON>` and `Option<&mut [c_char]>`, with exported wrappers preserving ABI. | accepted |
+| 50 | `run_3.log:67245` | 355 | -1 | 54,763 | Refactored the private object lookup helper so it takes `&cJSON` instead of raw `*const cJSON`, leaving null-object handling at the safe public wrapper boundary. | accepted |
+| 51 | `run_3.log:70986` | 343 | -12 | 128,722 | Changed `parse_number` to use a `Vec<u8>` temporary NUL-terminated buffer instead of hook-allocated raw memory, removing manual allocation/deallocation, `memcpy`, raw byte writes, and pointer `offset_from`; also changed `get_object_item` to return `Option<NonNull<cJSON>>`. | accepted |
+| 52 | `run_3.log:80672` | 196 | -147 | 111,797 | Refactored the print-buffer implementation cluster: `ensure`, `update_offset`, `print_number`, `print_string_ptr`, `print_string`, `print`, `print_value`, `print_array`, and `print_object` now use safe `&mut printbuffer` / `&cJSON` APIs, with `ensure` returning `Option<NonNull<c_uchar>>` and exported FFI signatures unchanged. | accepted |

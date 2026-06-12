@@ -1,14 +1,14 @@
 # with_plan_4 CRISP run summary
 
-This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
+This summary covers the CRISP-level safety-loop attempts logged in `run_1.log` and `run_2.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
 
-- Total accepted edits: 43
+- Total accepted edits: 58
 - Total rejected edits: 0
-- Total tokens used: 3,810,242
+- Total tokens used: 5,135,711
 - Initial unsafe count: 1359
-- Final unsafe count after run 1: 608
-- Net unsafe operations removed by accepted edits: 751
-- Omitted from the table: one agent execution starting at `run_1.log:61122` failed before returning an edit (`codex-cli failed: exit code 137`), and one trailing invocation starting at `run_1.log:382668` appears incomplete in the log.
+- Final unsafe count after run 2: 156
+- Net unsafe operations removed by accepted edits: 1203
+- Omitted from the table: one agent execution starting at `run_1.log:61122` failed before returning an edit (`codex-cli failed: exit code 137`); five initial `run_2.log` executions starting at `run_2.log:30`, `run_2.log:205`, `run_2.log:380`, `run_2.log:559`, and `run_2.log:738` failed before returning edits (`codex-cli failed: exit code 1`); trailing invocations starting at `run_1.log:382668` and `run_2.log:113688` appear incomplete in the logs.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---|---|
@@ -55,3 +55,18 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`. 
 | 41 | `run_1.log:356176` | 647 | -8 | 52,634 | Changed `cJSON_DetachItemViaPointer` and `cJSON_ReplaceItemViaPointer` to use `Option<&mut cJSON>` for parent objects in implementation code, updating array/object callers. | accepted |
 | 42 | `run_1.log:361461` | 633 | -14 | 84,637 | Changed object replacement internals so `replace_item_in_object`, `cJSON_ReplaceItemInObject`, and the case-sensitive variant use safe object/key boundaries. | accepted |
 | 43 | `run_1.log:366009` | 608 | -25 | 116,309 | Changed `create_reference` to return `Option<&'static mut cJSON>` and converted object-add implementation APIs to safe object/key inputs while exported wrappers keep the C ABI. | accepted |
+| 44 | `run_2.log:976` | 595 | -13 | 91,792 | Replaced `static mut global_error` with atomic address/position storage, made `cJSON_GetErrorPtr` safe internally, and updated parse error writes to avoid mutable static access. | accepted |
+| 45 | `run_2.log:6036` | 586 | -9 | 75,050 | Made `add_item_to_array`, `cJSON_AddItemToArray`, and `cJSON_AddItemReferenceToArray` safe implementation functions using safe array boundaries, and updated object-add/array-insert callers. | accepted |
+| 46 | `run_2.log:11858` | 578 | -8 | 88,541 | Changed internal `cJSON_Create*` constructors to return `Option<&'static mut cJSON>` instead of raw pointers, with exported wrappers preserving raw-pointer ABI and internal callers using safe references. | accepted |
+| 47 | `run_2.log:21674` | 464 | -114 | 94,045 | Rewrote `skip_oneline_comment`, `skip_multiline_comment`, `minify_string`, and implementation `cJSON_Minify` using safe slice/index logic; exported `cJSON_Minify` wrapper keeps raw ABI conversion. | accepted |
+| 48 | `run_2.log:28755` | 449 | -15 | 96,517 | Removed non-exported unsafe parser entry functions and added a safe slice-based `parse_with_length_opts` core, leaving raw pointer conversion, parse-end writes, and global error storage in FFI wrappers. | accepted |
+| 49 | `run_2.log:36301` | 323 | -126 | 104,005 | Refactored the print-buffer path so `ensure`/`update_offset` and the internal printer stack use `&mut printbuffer`; internal `print` now uses a normal local buffer instead of raw self-pointer, `memset`, or mutable static default size. | accepted |
+| 50 | `run_2.log:49510` | 320 | -3 | 93,105 | Changed `print_value` to borrow `&cJSON` once at entry and replace literal/raw string copies with bounded slice copies and `CStr::to_bytes_with_nul()`. | accepted |
+| 51 | `run_2.log:55208` | 281 | -39 | 83,749 | Rewrote `print_string_ptr` with `CStr`/byte slices and safe slice writes for escaping, removing `strcpy`, `memcpy`, raw offset writes, and `sprintf` from that function. | accepted |
+| 52 | `run_2.log:60120` | 239 | -42 | 97,606 | Changed `ensure` to return `Option<&mut [c_uchar]>` and updated printer writes in number/string/value/array/object printing to use safe slice indexing and copying. | accepted |
+| 53 | `run_2.log:73647` | 234 | -5 | 58,759 | Made `print_string_ptr` a safe helper taking `Option<&CStr>` instead of a raw pointer/`unsafe extern` signature, preserving null-input behavior and updating string-field call sites. | accepted |
+| 54 | `run_2.log:77976` | 216 | -18 | 57,272 | Converted printer internals to safe item references: `print_number` takes `&cJSON`, `print_value` takes `Option<&cJSON>`, and `print_array`/`print_object` borrow child nodes before dispatch. | accepted |
+| 55 | `run_2.log:85306` | 192 | -24 | 114,802 | Converted internal `print` and non-exported `cJSON_Print*` helpers to safe reference/slice APIs, with raw pointer conversion moved into exported FFI shims and preallocated printing using `&mut [c_char]` internally. | accepted |
+| 56 | `run_2.log:92658` | 183 | -9 | 89,417 | Replaced `print_number`'s C `sprintf`/`sscanf`/locale path with Rust formatting that preserves cJSON number-formatting rules, and removed the now-unused C formatting/locale code. | accepted |
+| 57 | `run_2.log:100844` | 159 | -24 | 113,564 | Made non-exported `cJSON_Duplicate` and `cJSON_Duplicate_rec` safe functions taking `Option<&cJSON>`, with exported wrappers preserving ABI and duplicate recursion using safe references where possible. | accepted |
+| 58 | `run_2.log:109609` | 156 | -3 | 67,245 | Changed non-exported duplicate helpers to return `Option<&'static mut cJSON>` internally and rewrote duplicate child-list linking to use safe mutable field references instead of raw dereferences of newly duplicated child nodes. | accepted |
