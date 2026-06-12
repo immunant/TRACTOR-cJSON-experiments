@@ -1,14 +1,14 @@
 # no_plan_3 CRISP run summary
 
-This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, and `run_3.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
+This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, `run_3.log`, and `run_4.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
 
-- Total accepted edits: 52
+- Total accepted edits: 63
 - Total rejected edits: 0
-- Total tokens used: 5,049,047
+- Total tokens used: 6,283,465
 - Initial unsafe count: 1359
-- Final unsafe count after run 3: 196
-- Net unsafe operations removed by accepted edits: 1163
-- Omitted from the table: trailing incomplete invocations starting at `run_1.log:241108`, `run_2.log:55326`, and `run_3.log:112395` appear incomplete in the logs.
+- Final unsafe count after run 4: 121
+- Net unsafe operations removed by accepted edits: 1238
+- Omitted from the table: trailing incomplete invocations starting at `run_1.log:241108`, `run_2.log:55326`, `run_3.log:112395`, and `run_4.log:114572` appear incomplete in the logs.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---|---|
@@ -64,3 +64,14 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, 
 | 50 | `run_3.log:67245` | 355 | -1 | 54,763 | Refactored the private object lookup helper so it takes `&cJSON` instead of raw `*const cJSON`, leaving null-object handling at the safe public wrapper boundary. | accepted |
 | 51 | `run_3.log:70986` | 343 | -12 | 128,722 | Changed `parse_number` to use a `Vec<u8>` temporary NUL-terminated buffer instead of hook-allocated raw memory, removing manual allocation/deallocation, `memcpy`, raw byte writes, and pointer `offset_from`; also changed `get_object_item` to return `Option<NonNull<cJSON>>`. | accepted |
 | 52 | `run_3.log:80672` | 196 | -147 | 111,797 | Refactored the print-buffer implementation cluster: `ensure`, `update_offset`, `print_number`, `print_string_ptr`, `print_string`, `print`, `print_value`, `print_array`, and `print_object` now use safe `&mut printbuffer` / `&cJSON` APIs, with `ensure` returning `Option<NonNull<c_uchar>>` and exported FFI signatures unchanged. | accepted |
+| 53 | `run_4.log:26` | 195 | -1 | 115,077 | Reworked `parse_number` to parse the longest numeric prefix safely from the existing input byte slice, removing its temporary C string construction and `strtod` call. | accepted |
+| 54 | `run_4.log:8890` | 195 | 0 | 92,184 | Removed unused `strncmp`/`strtod` FFI imports and narrowed the imported `lconv` layout to the single `decimal_point` field still read by the code. | accepted |
+| 55 | `run_4.log:13473` | 195 | 0 | 108,476 | Changed `cJSON_GetStringValue` so the implementation returns a raw-free marker enum after validation, leaving raw `valuestring` pointer conversion in the exported FFI wrapper. | accepted |
+| 56 | `run_4.log:19910` | 193 | -2 | 92,584 | Changed `print_number` to avoid C `sprintf` for the fixed `null` and plain integer cases, using safe Rust slice copies and integer string conversion instead. | accepted |
+| 57 | `run_4.log:25833` | 191 | -2 | 151,047 | Converted `replace_item_in_object`, `cJSON_ReplaceItemInObject`, and the case-sensitive variant to use `Option<&mut cJSON>` internally, keeping raw conversion in FFI wrappers. | accepted |
+| 58 | `run_4.log:34243` | 185 | -6 | 87,004 | Refactored `cJSON_Compare` array/object traversal so each non-null raw child pointer is converted to a reference once per loop iteration, reducing compare unsafe findings from 13 to 7. | accepted |
+| 59 | `run_4.log:39933` | 177 | -8 | 101,164 | Removed the remaining C varargs formatting path from `print_number`, replacing `sprintf`/`sscanf` and locale handling with Rust-owned string/byte construction. | accepted |
+| 60 | `run_4.log:49777` | 177 | 0 | 70,160 | Changed object lookup so `get_object_item` uses an internal `ObjectItemName` enum carrying safe `&CStr` or `&cJSON` handles, and updated `cJSON_Compare` to use that path. | accepted |
+| 61 | `run_4.log:55737` | 155 | -22 | 153,435 | Refactored the print-buffer write path to use bounded `NonNull<[u8]>` output windows and slice operations instead of raw byte writes and C `strcpy`/`strlen`. | accepted |
+| 62 | `run_4.log:77583` | 154 | -1 | 114,258 | Changed `cJSON_New_Item` to return `Option<NonNull<cJSON>>` internally and updated call sites to handle allocation failure through `Option`, removing one parse-path unsafe conversion. | accepted |
+| 63 | `run_4.log:90481` | 121 | -33 | 149,029 | Migrated internal `printbuffer` storage to safe `Vec<u8>` for dynamic printing and borrowed `&mut [u8]` for preallocated printing, with `ensure` returning safe mutable slices. | accepted |

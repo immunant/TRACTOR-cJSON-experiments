@@ -1,14 +1,14 @@
 # with_plan_4 CRISP run summary
 
-This summary covers the CRISP-level safety-loop attempts logged in `run_1.log` and `run_2.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
+This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, and `run_3.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
 
-- Total accepted edits: 58
+- Total accepted edits: 70
 - Total rejected edits: 0
-- Total tokens used: 5,135,711
+- Total tokens used: 6,490,206
 - Initial unsafe count: 1359
-- Final unsafe count after run 2: 156
-- Net unsafe operations removed by accepted edits: 1203
-- Omitted from the table: one agent execution starting at `run_1.log:61122` failed before returning an edit (`codex-cli failed: exit code 137`); five initial `run_2.log` executions starting at `run_2.log:30`, `run_2.log:205`, `run_2.log:380`, `run_2.log:559`, and `run_2.log:738` failed before returning edits (`codex-cli failed: exit code 1`); trailing invocations starting at `run_1.log:382668` and `run_2.log:113688` appear incomplete in the logs.
+- Final unsafe count after run 3: 21
+- Net unsafe operations removed by accepted edits: 1338
+- Omitted from the table: one agent execution starting at `run_1.log:61122` failed before returning an edit (`codex-cli failed: exit code 137`); five initial `run_2.log` executions starting at `run_2.log:30`, `run_2.log:205`, `run_2.log:380`, `run_2.log:559`, and `run_2.log:738` failed before returning edits (`codex-cli failed: exit code 1`); trailing invocations starting at `run_1.log:382668`, `run_2.log:113688`, and `run_3.log:172746` appear incomplete in the logs.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---|---|
@@ -70,3 +70,15 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log` a
 | 56 | `run_2.log:92658` | 183 | -9 | 89,417 | Replaced `print_number`'s C `sprintf`/`sscanf`/locale path with Rust formatting that preserves cJSON number-formatting rules, and removed the now-unused C formatting/locale code. | accepted |
 | 57 | `run_2.log:100844` | 159 | -24 | 113,564 | Made non-exported `cJSON_Duplicate` and `cJSON_Duplicate_rec` safe functions taking `Option<&cJSON>`, with exported wrappers preserving ABI and duplicate recursion using safe references where possible. | accepted |
 | 58 | `run_2.log:109609` | 156 | -3 | 67,245 | Changed non-exported duplicate helpers to return `Option<&'static mut cJSON>` internally and rewrote duplicate child-list linking to use safe mutable field references instead of raw dereferences of newly duplicated child nodes. | accepted |
+| 59 | `run_3.log:26` | 80 | -76 | 145,311 | Replaced `static mut global_hooks` with `RwLock<internal_hooks>`, added safe hook snapshots, converted hook-plumbing helpers to take `&internal_hooks`, and made non-exported hook/allocation helpers safe while preserving exported FFI signatures. | accepted |
+| 60 | `run_3.log:35017` | 78 | -2 | 72,747 | Changed node allocation/deletion to use `Box::new`/`Box::leak` for `cJSON_New_Item` and `Box::from_raw` in `cJSON_Delete`, while leaving hook-based string/buffer deallocation unchanged. | accepted |
+| 61 | `run_3.log:39098` | 64 | -14 | 106,873 | Added safe `Vec<c_char>` ownership for parser-created value strings and object keys, refactored `parse_string` to decode into owned storage, and updated transfer/delete/add/set/replace paths to avoid hook-freeing parser-owned strings. | accepted |
+| 62 | `run_3.log:49271` | 62 | -2 | 109,071 | Converted internal string owners from `Vec<c_char>` to `Vec<u8>`, removed `cJSON_strdup`, routed owned string creation/copying through safe storage, and added safe string accessors. | accepted |
+| 63 | `run_3.log:65758` | 52 | -10 | 104,336 | Updated string ownership/read paths so clone/reference/const-key cases keep owned safe storage, removing raw `CStr::from_ptr` reads from print, object lookup, duplicate, and compare paths. | accepted |
+| 64 | `run_3.log:72868` | 49 | -3 | 108,768 | Converted add/insert implementation boundaries from raw child item pointers to `Option<&mut cJSON>` / `&mut cJSON`, keeping raw pointer conversion at exported entry points. | accepted |
+| 65 | `run_3.log:86284` | 45 | -4 | 123,668 | Changed `cJSON_Compare` so it no longer directly dereferences raw child/next pointers; array/object comparison now goes through the existing lookup boundary, bringing `cJSON_Compare` to 0 unsafe findings. | accepted |
+| 66 | `run_3.log:96861` | 42 | -3 | 97,938 | Changed `print_array`, `print_object`, and `cJSON_Duplicate_rec` to stop directly traversing raw `next` pointers and use the existing `get_array_item` lookup boundary instead. | accepted |
+| 67 | `run_3.log:106502` | 40 | -2 | 94,239 | Converted replacement-node implementation paths to take `Option<&mut cJSON>` instead of raw replacement pointers, with FFI wrappers preserving their C ABI signatures. | accepted |
+| 68 | `run_3.log:115981` | 23 | -17 | 114,928 | Migrated the print-buffer unit to safe memory management: `printbuffer` stores output in `Vec<u8>`, internal print helpers no longer use unsafe buffer management, and raw allocation/copying remains at exported print FFI boundaries. | accepted |
+| 69 | `run_3.log:132314` | 22 | -1 | 166,725 | Removed the non-FFI `cJSON_malloc` implementation wrapper and moved hook allocation directly into the exported FFI entry point, preserving the `cJSON_malloc` ABI. | accepted |
+| 70 | `run_3.log:160702` | 21 | -1 | 109,891 | Changed `add_item_to_object` so implementation code no longer performs hook-based raw deallocation; it now replaces owned `string_storage` safely while exported object-add entry points preserve legacy raw-key cleanup at the FFI boundary. | accepted |
