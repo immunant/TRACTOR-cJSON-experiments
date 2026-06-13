@@ -1,14 +1,14 @@
 # no_plan_3 CRISP run summary
 
-This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, `run_3.log`, and `run_4.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
+This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, `run_3.log`, `run_4.log`, and `run_5.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
 
-- Total accepted edits: 63
+- Total accepted edits: 75
 - Total rejected edits: 0
-- Total tokens used: 6,283,465
+- Total tokens used: 7,482,927
 - Initial unsafe count: 1359
-- Final unsafe count after run 4: 121
-- Net unsafe operations removed by accepted edits: 1238
-- Omitted from the table: trailing incomplete invocations starting at `run_1.log:241108`, `run_2.log:55326`, `run_3.log:112395`, and `run_4.log:114572` appear incomplete in the logs.
+- Final unsafe count after run 5: 49
+- Net unsafe operations removed by accepted edits: 1310
+- Omitted from the table: trailing incomplete invocations starting at `run_1.log:241108`, `run_2.log:55326`, `run_3.log:112395`, and `run_4.log:114572`, and `run_5.log:168685` appear incomplete in the logs.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---|---|
@@ -75,3 +75,15 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, 
 | 61 | `run_4.log:55737` | 155 | -22 | 153,435 | Refactored the print-buffer write path to use bounded `NonNull<[u8]>` output windows and slice operations instead of raw byte writes and C `strcpy`/`strlen`. | accepted |
 | 62 | `run_4.log:77583` | 154 | -1 | 114,258 | Changed `cJSON_New_Item` to return `Option<NonNull<cJSON>>` internally and updated call sites to handle allocation failure through `Option`, removing one parse-path unsafe conversion. | accepted |
 | 63 | `run_4.log:90481` | 121 | -33 | 149,029 | Migrated internal `printbuffer` storage to safe `Vec<u8>` for dynamic printing and borrowed `&mut [u8]` for preallocated printing, with `ensure` returning safe mutable slices. | accepted |
+| 64 | `run_5.log:26` | 102 | -19 | 165,856 | Migrated `cJSON.valuestring` from a nullable raw pointer to `cJSON_ValueString`; owned JSON strings now use `Rc<CString>`, with FFI wrappers preserving raw pointer return behavior. | accepted |
+| 65 | `run_5.log:41426` | 99 | -3 | 95,181 | Changed `cJSON.string` from a raw `*mut c_char` to `Option<cJSON_ValueString>`, reusing safe owned/reference string storage for object keys. | accepted |
+| 66 | `run_5.log:54587` | 92 | -7 | 86,869 | Changed `cJSON_ValueString::Reference` to store a safe `&'static CStr` instead of a `size_t` address and updated related string printing, duplication, object-key, and comparison paths. | accepted |
+| 67 | `run_5.log:72856` | 90 | -2 | 54,255 | Removed the unsafe internal `cJSON_strdup` helper and changed internal print functions to return owned `CString` values while exported FFI functions keep raw C-string allocation behavior. | accepted |
+| 68 | `run_5.log:77808` | 89 | -1 | 84,362 | Removed the non-FFI `cJSON_free` implementation wrapper and moved its deallocation logic into the exported `cJSON_free` FFI entry point. | accepted |
+| 69 | `run_5.log:83101` | 86 | -3 | 75,050 | Changed read-only array/object lookup helpers to return `Option<&cJSON>` instead of exposing `NonNull<cJSON>` through implementation APIs. | accepted |
+| 70 | `run_5.log:91298` | 76 | -10 | 134,032 | Refactored read-only child-list traversal in print, array size, object lookup, duplication, and comparison paths, reducing direct raw traversal through shared safe lookup flow. | accepted |
+| 71 | `run_5.log:101434` | 73 | -3 | 168,669 | Changed `parse_array` to build children with `Vec<Box<cJSON>>` during parsing and link/leak them only after validation, adding helpers for boxed child construction. | accepted |
+| 72 | `run_5.log:136075` | 73 | 0 | 109,947 | Changed `cJSON_GetStringValue` to return `Option<&CStr>` internally, with raw pointer conversion remaining in the exported wrapper. | accepted |
+| 73 | `run_5.log:142218` | 67 | -6 | 66,809 | Refactored `parse_object` to remove raw `head`/`current_item` locals and local unsafe raw-pointer dereferences during object child construction. | accepted |
+| 74 | `run_5.log:148896` | 49 | -18 | 70,830 | Changed internal linked-list fields `next`, `prev`, and `child` from nullable raw pointers to `Option<NonNull<cJSON>>`, updating creation, parsing, traversal, and mutation code accordingly. | accepted |
+| 75 | `run_5.log:160325` | 49 | 0 | 87,602 | Removed unused `internal_hooks` plumbing from `parse_buffer` and simplified `cJSON_New_Item` / boxed item construction so item initialization no longer carries hook state. | accepted |

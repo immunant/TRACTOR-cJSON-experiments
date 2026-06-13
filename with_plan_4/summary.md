@@ -1,14 +1,14 @@
 # with_plan_4 CRISP run summary
 
-This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, and `run_3.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
+This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, `run_3.log`, and `run_4.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
 
-- Total accepted edits: 70
+- Total accepted edits: 79
 - Total rejected edits: 0
-- Total tokens used: 6,490,206
+- Total tokens used: 7,601,711
 - Initial unsafe count: 1359
-- Final unsafe count after run 3: 21
-- Net unsafe operations removed by accepted edits: 1338
-- Omitted from the table: one agent execution starting at `run_1.log:61122` failed before returning an edit (`codex-cli failed: exit code 137`); five initial `run_2.log` executions starting at `run_2.log:30`, `run_2.log:205`, `run_2.log:380`, `run_2.log:559`, and `run_2.log:738` failed before returning edits (`codex-cli failed: exit code 1`); trailing invocations starting at `run_1.log:382668`, `run_2.log:113688`, and `run_3.log:172746` appear incomplete in the logs.
+- Final unsafe count after run 4: 11
+- Net unsafe operations removed by accepted edits: 1348
+- Omitted from the table: one agent execution starting at `run_1.log:61122` failed before returning an edit (`codex-cli failed: exit code 137`); five initial `run_2.log` executions starting at `run_2.log:30`, `run_2.log:205`, `run_2.log:380`, `run_2.log:559`, and `run_2.log:738` failed before returning edits (`codex-cli failed: exit code 1`); trailing invocations starting at `run_1.log:382668`, `run_2.log:113688`, and `run_3.log:172746`, and `run_4.log:138799` appear incomplete in the logs.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---|---|
@@ -82,3 +82,12 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, 
 | 68 | `run_3.log:115981` | 23 | -17 | 114,928 | Migrated the print-buffer unit to safe memory management: `printbuffer` stores output in `Vec<u8>`, internal print helpers no longer use unsafe buffer management, and raw allocation/copying remains at exported print FFI boundaries. | accepted |
 | 69 | `run_3.log:132314` | 22 | -1 | 166,725 | Removed the non-FFI `cJSON_malloc` implementation wrapper and moved hook allocation directly into the exported FFI entry point, preserving the `cJSON_malloc` ABI. | accepted |
 | 70 | `run_3.log:160702` | 21 | -1 | 109,891 | Changed `add_item_to_object` so implementation code no longer performs hook-based raw deallocation; it now replaces owned `string_storage` safely while exported object-add entry points preserve legacy raw-key cleanup at the FFI boundary. | accepted |
+| 71 | `run_4.log:26` | 20 | -1 | 91,182 | Removed the non-FFI `cJSON_free` implementation wrapper and kept hook deallocation inside exported FFI boundaries while preserving raw cleanup behavior. | accepted |
+| 72 | `run_4.log:8371` | 18 | -2 | 95,815 | Changed `cJSON_Delete` so implementation code no longer calls hook deallocators for `valuestring` and `string`; storage cleanup is handled by owned fields or FFI boundaries. | accepted |
+| 73 | `run_4.log:16213` | 16 | -2 | 95,499 | Reworked `print_number` to use `std::fmt::Write` into `String`s instead of `format!`, preserving existing exponential/floating formatting behavior while reducing checker-reported unsafe. | accepted |
+| 74 | `run_4.log:23720` | 16 | 0 | 104,277 | Added an inert `children: Vec<Box<cJSON>>` field and initialization as a checker-clean prerequisite for later raw child/list migration. | accepted |
+| 75 | `run_4.log:28498` | 15 | -1 | 87,628 | Refactored `get_object_item` to avoid directly dereferencing raw sibling pointers by traversing through the existing `get_array_item` accessor. | accepted |
+| 76 | `run_4.log:36026` | 15 | 0 | 228,772 | Changed `cJSON_DetachItemViaPointer` to return `Option<&'static mut cJSON>` internally, with FFI/callers converting back to raw pointers where required. | accepted |
+| 77 | `run_4.log:79970` | 15 | 0 | 88,604 | Updated `get_array_item` to read from safe `children: Vec<Box<cJSON>>` storage when populated, falling back to the existing raw sibling chain. | accepted |
+| 78 | `run_4.log:87914` | 15 | 0 | 184,065 | Reworked `parse_array` and `parse_object` to use the existing `add_item_to_array` path instead of duplicating list-linking logic, while preserving behavior. | accepted |
+| 79 | `run_4.log:121669` | 11 | -4 | 135,663 | Added `refresh_child_links` and migrated detach/list handling so raw mirror links are rebuilt from safe child storage, reducing unsafe in the detach/list area. | accepted |
