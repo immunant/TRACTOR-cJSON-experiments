@@ -20,6 +20,8 @@ RESULT_MARKER = "do_safety_step_agent result[0]"
 COUNT_RE = re.compile(r"(\d+) unsafe operations remaining")
 TOKEN_VALUE_RE = re.compile(r"([0-9,]+)\s*$")
 TIMESTAMP_RE = re.compile(r"^\[[^]]+\]\s*")
+AGENT_EXEC_RE = re.compile(r"^\[[^]]+\]\s*exec\s*$")
+CHECK_UNSAFE2_INCREASE_RE = re.compile(r": .*\bincreased: \d+ -> \d+")
 
 # Lines that usually mean the final assistant prose block has ended.
 SUMMARY_STOP_PREFIXES = (
@@ -80,6 +82,64 @@ def first_count_after(counts: list[tuple[int, int]], line_no: int) -> tuple[int 
     return min(later, default=(None, None), key=lambda item: item[0] or 10**18)
 
 
+def parse_agent_check_unsafe2_runs(lines: list[str], start_idx: int, end_idx: int) -> list[dict[str, Any]]:
+    """Find agent-invoked cargo check-unsafe2 command executions in a step.
+
+    This intentionally ignores CRISP's own post-agent `check_unsafe2_op`, whose
+    log lines are not timestamped agent `exec` command blocks.
+    """
+    runs: list[dict[str, Any]] = []
+    idx = start_idx
+    while idx < end_idx:
+        if not AGENT_EXEC_RE.match(lines[idx]):
+            idx += 1
+            continue
+
+        cmd_start = idx + 1
+        if cmd_start >= end_idx:
+            idx += 1
+            continue
+
+        command_lines: list[str] = []
+        cmd_end = cmd_start
+        while cmd_end < end_idx:
+            cleaned = strip_agent_prefix(lines[cmd_end])
+            command_lines.append(cleaned)
+            if " in /root/work" in cleaned or " in /root/work/" in cleaned:
+                break
+            # If this was not a shell command line, stop early.
+            if cmd_end == cmd_start and not cleaned.startswith("/bin/bash -lc"):
+                break
+            cmd_end += 1
+
+        command_text = "\n".join(command_lines)
+        if "cargo check-unsafe2" not in command_text:
+            idx = max(cmd_end + 1, idx + 1)
+            continue
+
+        block_end = cmd_end + 1
+        while block_end < end_idx and not AGENT_EXEC_RE.match(lines[block_end]):
+            block_end += 1
+
+        increase_lines = []
+        for line_idx in range(cmd_end + 1, block_end):
+            cleaned = strip_agent_prefix(lines[line_idx]).strip()
+            if CHECK_UNSAFE2_INCREASE_RE.search(cleaned):
+                increase_lines.append({"line": line_idx + 1, "text": cleaned})
+
+        runs.append(
+            {
+                "line": cmd_start + 1,
+                "command": command_text,
+                "reported_increase": bool(increase_lines),
+                "increase_lines": increase_lines,
+            }
+        )
+        idx = block_end
+
+    return runs
+
+
 def parse_log(path: Path) -> dict[str, Any]:
     lines = path.read_text(errors="replace").splitlines()
 
@@ -112,6 +172,7 @@ def parse_log(path: Path) -> dict[str, Any]:
 
         before_line, before_count = latest_count_before(counts, start_line)
         token_line, tokens_used, summary_lines = parse_token_and_summary(lines, start_idx, end_idx)
+        check_unsafe2_runs = parse_agent_check_unsafe2_runs(lines, start_idx, end_idx)
 
         item: dict[str, Any] = {
             "step": step_index,
@@ -123,6 +184,11 @@ def parse_log(path: Path) -> dict[str, Any]:
             "summary_lines": summary_lines,
             "summary_text": " ".join(summary_lines),
             "failure_lines": failure_lines,
+            "agent_check_unsafe2_runs": check_unsafe2_runs,
+            "agent_check_unsafe2_count": len(check_unsafe2_runs),
+            "agent_check_unsafe2_increase_count": sum(
+                1 for run in check_unsafe2_runs if run["reported_increase"]
+            ),
         }
 
         if result_line is not None:
@@ -155,6 +221,12 @@ def parse_log(path: Path) -> dict[str, Any]:
         "incomplete_steps": incomplete,
         "total_tokens_completed": sum(
             step["tokens_used"] or 0 for step in completed
+        ),
+        "agent_check_unsafe2_count": sum(
+            step["agent_check_unsafe2_count"] for step in completed + incomplete
+        ),
+        "agent_check_unsafe2_increase_count": sum(
+            step["agent_check_unsafe2_increase_count"] for step in completed + incomplete
         ),
     }
 

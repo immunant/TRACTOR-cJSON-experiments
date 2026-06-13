@@ -91,3 +91,42 @@ python3 /home/legare/cJSON_lib/parse_crisp_log.py /home/legare/cJSON_lib/no_plan
 ```
 
 The parser intentionally emits raw summaries rather than polished prose. I still review the summary snippets manually because they sometimes contain too much detail, or they omit an important rejection reason that appears elsewhere in the block.
+
+
+## Counting agent `check-unsafe2` attempts
+
+`parse_crisp_log.py` also extracts `cargo check-unsafe2` executions run by the agent inside each `do_safety_step_agent` transcript. It looks for timestamped agent `exec` command blocks such as:
+
+```text
+[12:10:27    72] exec
+[12:10:27    72] /bin/bash -lc 'cargo clean --manifest-path rust/Cargo.toml
+[12:10:27    72] cargo check-unsafe2 --manifest-path rust/Cargo.toml' in /root/work
+```
+
+It intentionally ignores CRISP's own post-agent `check_unsafe2_op`, which appears later as untimestamped CRISP workflow output. A check run is counted as reporting an unsafe increase if the command output block contains diagnostics like:
+
+```text
+cjson::src::cJSON::cJSON_Compare: unsafe function calls increased: 1 -> 3
+```
+
+Relevant JSON fields:
+
+- `agent_check_unsafe2_count`: number of agent-invoked `cargo check-unsafe2` command executions in the parsed log or step.
+- `agent_check_unsafe2_increase_count`: number of those executions whose output reported at least one increased unsafe-adjacent count.
+- `agent_check_unsafe2_runs`: per-command detail, including command line and diagnostic line numbers.
+
+Example aggregate command:
+
+```sh
+python3 - <<'INNERPY'
+import json, subprocess
+from pathlib import Path
+for log in [Path('run_1.log'), Path('run_2.log')]:
+    data = json.loads(subprocess.check_output([
+        'python3', '/home/legare/cJSON_lib/parse_crisp_log.py', str(log)
+    ]))
+    completed_checks = sum(s['agent_check_unsafe2_count'] for s in data['completed_steps'])
+    completed_increases = sum(s['agent_check_unsafe2_increase_count'] for s in data['completed_steps'])
+    print(log, completed_checks, completed_increases)
+INNERPY
+```
