@@ -1,13 +1,13 @@
 # with_plan_4 CRISP run summary
 
-This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, `run_3.log`, and `run_4.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
+This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, `run_3.log`, `run_4.log`, and `run_5.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
 
-- Total accepted edits: 79
-- Total rejected edits: 0
-- Total tokens used: 7,601,711
+- Total accepted edits: 81
+- Total rejected edits: 1
+- Total tokens used: 8,057,385
 - Initial unsafe count: 1359
-- Final unsafe count after run 4: 11
-- Net unsafe operations removed by accepted edits: 1348
+- Final unsafe count after run 5: 0
+- Net unsafe operations removed by accepted edits: 1359
 - Omitted from the table: one agent execution starting at `run_1.log:61122` failed before returning an edit (`codex-cli failed: exit code 137`); five initial `run_2.log` executions starting at `run_2.log:30`, `run_2.log:205`, `run_2.log:380`, `run_2.log:559`, and `run_2.log:738` failed before returning edits (`codex-cli failed: exit code 1`); trailing invocations starting at `run_1.log:382668`, `run_2.log:113688`, and `run_3.log:172746`, and `run_4.log:138799` appear incomplete in the logs.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
@@ -91,3 +91,6 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, 
 | 77 | `run_4.log:79970` | 15 | 0 | 88,604 | Updated `get_array_item` to read from safe `children: Vec<Box<cJSON>>` storage when populated, falling back to the existing raw sibling chain. | accepted |
 | 78 | `run_4.log:87914` | 15 | 0 | 184,065 | Reworked `parse_array` and `parse_object` to use the existing `add_item_to_array` path instead of duplicating list-linking logic, while preserving behavior. | accepted |
 | 79 | `run_4.log:121669` | 11 | -4 | 135,663 | Added `refresh_child_links` and migrated detach/list handling so raw mirror links are rebuilt from safe child storage, reducing unsafe in the detach/list area. | accepted |
+| 80 | `run_5.log:26` | 11 | 0 | 124,677 | Attempted to turn `cJSON_InsertItemInArray` into a direct exported FFI entry point with a `Box::from_raw` vector-backed path and legacy raw-list fallback, but CRISP rejected it because `check-unsafe2` saw the non-FFI implementation gain an unsafe qualifier, unsafe calls, and raw-pointer signature types. | rejected |
+| 81 | `run_5.log:8349` | 7 | -4 | 198,881 | Migrated creation, parser, duplicate, add, and insert child construction toward owned `Box<cJSON>` and `children: Vec<Box<cJSON>>`, with raw-list compatibility kept in exported FFI wrappers. | accepted |
+| 82 | `run_5.log:88751` | 0 | -7 | 132,116 | Moved replacement, delete, detach, array lookup, and raw linked-list compatibility so implementation code uses owned `Box<cJSON>`/safe child storage while raw traversal remains localized to exported FFI wrappers. | accepted |
