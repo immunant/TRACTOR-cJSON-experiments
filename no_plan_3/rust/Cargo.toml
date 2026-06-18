@@ -12,6 +12,7 @@ path = "lib.rs"
 crate-type = [ "cdylib",]
 
 [dependencies]
+sprintf = "0.4.3"
 
 [workspace]
 members = []

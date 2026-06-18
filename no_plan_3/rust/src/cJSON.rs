@@ -1,29 +1,43 @@
 extern "C" {
-    fn memcpy(
-        __dest: *mut ::core::ffi::c_void,
-        __src: *const ::core::ffi::c_void,
-        __n: size_t,
-    ) -> *mut ::core::ffi::c_void;
-    fn strcmp(
-        __s1: *const ::core::ffi::c_char,
-        __s2: *const ::core::ffi::c_char,
-    ) -> ::core::ffi::c_int;
     fn malloc(__size: size_t) -> *mut ::core::ffi::c_void;
-    fn realloc(__ptr: *mut ::core::ffi::c_void, __size: size_t) -> *mut ::core::ffi::c_void;
     fn free(__ptr: *mut ::core::ffi::c_void);
 }
 pub type size_t = usize;
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct cJSON {
-    pub next: *mut cJSON,
-    pub prev: *mut cJSON,
-    pub child: *mut cJSON,
+    pub children: Vec<cJSON>,
+    pub reference_child: Option<&'static cJSON>,
     pub type_0: ::core::ffi::c_int,
-    pub valuestring: *mut ::core::ffi::c_char,
+    pub valuestring: Option<cJSON_ValueString>,
     pub valueint: ::core::ffi::c_int,
     pub valuedouble: ::core::ffi::c_double,
-    pub string: *mut ::core::ffi::c_char,
+    pub string: Option<cJSON_ValueString>,
+}
+impl Clone for cJSON {
+    fn clone(&self) -> Self {
+        Self {
+            children: Vec::new(),
+            reference_child: None,
+            type_0: self.type_0 | cJSON_IsReference,
+            valuestring: self.valuestring.clone(),
+            valueint: self.valueint,
+            valuedouble: self.valuedouble,
+            string: self.string.clone(),
+        }
+    }
+}
+#[derive(Clone)]
+pub enum cJSON_ValueString {
+    Owned(::std::rc::Rc<::std::ffi::CString>),
+    Reference(&'static ::std::ffi::CStr),
+}
+impl cJSON_ValueString {
+    fn as_c_str(&self) -> &::std::ffi::CStr {
+        match self {
+            Self::Owned(value) => value.as_c_str(),
+            Self::Reference(value) => value,
+        }
+    }
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -37,8 +51,6 @@ pub type cJSON_bool = ::core::ffi::c_int;
 pub struct internal_hooks {
     pub allocate: Option<unsafe extern "C" fn(size_t) -> *mut ::core::ffi::c_void>,
     pub deallocate: Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()>,
-    pub reallocate:
-        Option<unsafe extern "C" fn(*mut ::core::ffi::c_void, size_t) -> *mut ::core::ffi::c_void>,
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -52,7 +64,6 @@ pub struct parse_buffer<'a> {
     pub length: size_t,
     pub offset: size_t,
     pub depth: size_t,
-    pub hooks: internal_hooks,
 }
 pub enum printbuffer_buffer<'a> {
     Dynamic(::std::vec::Vec<::core::ffi::c_uchar>),
@@ -100,25 +111,18 @@ pub unsafe extern "C" fn cJSON_GetErrorPtr_ffi() -> *const ::core::ffi::c_char {
     ::core::ptr::with_exposed_provenance::<::core::ffi::c_char>(location.json_addr)
         .wrapping_add(location.position)
 }
-pub enum cJSON_StringValue {
-    Present,
-}
-pub fn cJSON_GetStringValue(item: Option<&cJSON>) -> Option<cJSON_StringValue> {
+pub fn cJSON_GetStringValue(item: Option<&cJSON>) -> Option<&::std::ffi::CStr> {
     let item = item?;
     if cJSON_IsString(Some(item)) == 0 {
         return None;
     }
-    if item.valuestring.is_null() {
-        return None;
-    }
-    Some(cJSON_StringValue::Present)
+    item.valuestring.as_ref().map(cJSON_ValueString::as_c_str)
 }
 #[export_name = "cJSON_GetStringValue"]
 pub unsafe extern "C" fn cJSON_GetStringValue_ffi(item: *const cJSON) -> *mut ::core::ffi::c_char {
-    let item = item.as_ref();
-    match (item, cJSON_GetStringValue(item)) {
-        (Some(item), Some(cJSON_StringValue::Present)) => item.valuestring,
-        _ => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+    match cJSON_GetStringValue(item.as_ref()) {
+        Some(valuestring) => valuestring.as_ptr().cast_mut(),
+        None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
     }
 }
 pub fn cJSON_GetNumberValue(item: Option<&cJSON>) -> ::core::ffi::c_double {
@@ -165,10 +169,6 @@ fn case_insensitive_strcmp(
 static global_hooks: ::std::sync::Mutex<internal_hooks> = ::std::sync::Mutex::new(internal_hooks {
     allocate: Some(malloc as unsafe extern "C" fn(size_t) -> *mut ::core::ffi::c_void),
     deallocate: Some(free as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()),
-    reallocate: Some(
-        realloc
-            as unsafe extern "C" fn(*mut ::core::ffi::c_void, size_t) -> *mut ::core::ffi::c_void,
-    ),
 });
 fn get_global_hooks() -> internal_hooks {
     *global_hooks
@@ -180,74 +180,23 @@ fn set_global_hooks(hooks: internal_hooks) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = hooks;
 }
-fn cJSON_strdup(
-    string: Option<&::std::ffi::CStr>,
-    hooks: &internal_hooks,
-) -> Option<::core::ptr::NonNull<::core::ffi::c_char>> {
-    let string = string?;
-    let bytes = string.to_bytes_with_nul();
-    let copy = unsafe { hooks.allocate.expect("non-null function pointer")(bytes.len()) }
-        as *mut ::core::ffi::c_char;
-    let copy = ::core::ptr::NonNull::new(copy)?;
-    unsafe {
-        ::core::ptr::copy_nonoverlapping(
-            bytes.as_ptr().cast::<::core::ffi::c_char>(),
-            copy.as_ptr(),
-            bytes.len(),
-        );
-    }
-    Some(copy)
-}
 pub fn cJSON_InitHooks(hooks: Option<&cJSON_Hooks>) {
     let Some(hooks) = hooks else {
         set_global_hooks(internal_hooks {
             allocate: Some(malloc as unsafe extern "C" fn(size_t) -> *mut ::core::ffi::c_void),
             deallocate: Some(free as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()),
-            reallocate: Some(
-                realloc
-                    as unsafe extern "C" fn(
-                        *mut ::core::ffi::c_void,
-                        size_t,
-                    ) -> *mut ::core::ffi::c_void,
-            ),
         });
         return;
     };
     let mut new_hooks = internal_hooks {
         allocate: Some(malloc as unsafe extern "C" fn(size_t) -> *mut ::core::ffi::c_void),
         deallocate: Some(free as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()),
-        reallocate: None,
     };
-    let default_allocate = new_hooks
-        .allocate
-        .expect("default allocate hook must be present");
-    let default_deallocate = new_hooks
-        .deallocate
-        .expect("default deallocate hook must be present");
     if hooks.malloc_fn.is_some() {
         new_hooks.allocate = hooks.malloc_fn;
     }
     if hooks.free_fn.is_some() {
         new_hooks.deallocate = hooks.free_fn;
-    }
-    let uses_default_allocate = if let Some(allocate) = new_hooks.allocate {
-        ::core::ptr::fn_addr_eq(allocate, default_allocate)
-    } else {
-        false
-    };
-    let uses_default_deallocate = if let Some(deallocate) = new_hooks.deallocate {
-        ::core::ptr::fn_addr_eq(deallocate, default_deallocate)
-    } else {
-        false
-    };
-    if uses_default_allocate && uses_default_deallocate {
-        new_hooks.reallocate = Some(
-            realloc
-                as unsafe extern "C" fn(
-                    *mut ::core::ffi::c_void,
-                    size_t,
-                ) -> *mut ::core::ffi::c_void,
-        );
     }
     set_global_hooks(new_hooks);
 }
@@ -255,63 +204,32 @@ pub fn cJSON_InitHooks(hooks: Option<&cJSON_Hooks>) {
 pub unsafe extern "C" fn cJSON_InitHooks_ffi(mut hooks: *mut cJSON_Hooks) {
     cJSON_InitHooks(hooks.as_ref())
 }
-fn cJSON_New_Item(
-    hooks: &internal_hooks,
-    initialize: impl FnOnce(&mut cJSON),
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let node = unsafe {
-        hooks.allocate.expect("non-null function pointer")(::core::mem::size_of::<cJSON>() as size_t)
-    } as *mut cJSON;
-    let node = ::core::ptr::NonNull::new(node)?;
+fn cJSON_New_Item(initialize: impl FnOnce(&mut cJSON)) -> cJSON {
     let mut item = cJSON {
-        next: ::core::ptr::null_mut::<cJSON>(),
-        prev: ::core::ptr::null_mut::<cJSON>(),
-        child: ::core::ptr::null_mut::<cJSON>(),
+        children: Vec::new(),
+        reference_child: None,
         type_0: 0 as ::core::ffi::c_int,
-        valuestring: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+        valuestring: None,
         valueint: 0 as ::core::ffi::c_int,
         valuedouble: 0.0f64,
-        string: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+        string: None,
     };
     initialize(&mut item);
-    unsafe {
-        node.as_ptr().write(item);
-    }
-    Some(node)
+    item
 }
-pub fn cJSON_Delete(mut item: *mut cJSON) {
-    let mut next: *mut cJSON = ::core::ptr::null_mut::<cJSON>();
-    unsafe {
-        while !item.is_null() {
-            next = (*item).next as *mut cJSON;
-            if (*item).type_0 & cJSON_IsReference == 0 && !(*item).child.is_null() {
-                cJSON_Delete((*item).child as *mut cJSON);
-            }
-            if (*item).type_0 & cJSON_IsReference == 0 && !(*item).valuestring.is_null() {
-                get_global_hooks()
-                    .deallocate
-                    .expect("non-null function pointer")(
-                    (*item).valuestring as *mut ::core::ffi::c_void,
-                );
-                (*item).valuestring = ::core::ptr::null_mut::<::core::ffi::c_char>();
-            }
-            if (*item).type_0 & cJSON_StringIsConst == 0 && !(*item).string.is_null() {
-                get_global_hooks()
-                    .deallocate
-                    .expect("non-null function pointer")(
-                    (*item).string as *mut ::core::ffi::c_void,
-                );
-                (*item).string = ::core::ptr::null_mut::<::core::ffi::c_char>();
-            }
-            get_global_hooks()
-                .deallocate
-                .expect("non-null function pointer")(item as *mut ::core::ffi::c_void);
-            item = next;
-        }
-    }
+fn cJSON_New_Item_Box(initialize: impl FnOnce(&mut cJSON)) -> Box<cJSON> {
+    Box::new(cJSON_New_Item(initialize))
+}
+pub fn cJSON_Delete(item: Option<Box<cJSON>>) {
+    drop(item);
 }
 #[export_name = "cJSON_Delete"]
 pub unsafe extern "C" fn cJSON_Delete_ffi(mut item: *mut cJSON) {
+    let item = if item.is_null() {
+        None
+    } else {
+        Some(Box::from_raw(item))
+    };
     cJSON_Delete(item)
 }
 fn parse_number_prefix(number: &[::core::ffi::c_uchar]) -> Option<(::core::ffi::c_double, size_t)> {
@@ -389,42 +307,17 @@ pub unsafe extern "C" fn cJSON_SetNumberHelper_ffi(
         .expect("cJSON_SetNumberHelper received a null object pointer");
     cJSON_SetNumberHelper(object, number)
 }
-pub fn cJSON_SetValuestring(
-    object: &mut cJSON,
+pub fn cJSON_SetValuestring<'a>(
+    object: &'a mut cJSON,
     valuestring: &::std::ffi::CStr,
-) -> Option<::core::ptr::NonNull<::core::ffi::c_char>> {
+) -> Option<&'a ::std::ffi::CStr> {
     if object.type_0 & cJSON_String == 0 || object.type_0 & cJSON_IsReference != 0 {
         return None;
     }
-    let current = ::core::ptr::NonNull::new(object.valuestring)?;
-    let v1_len = valuestring.to_bytes().len();
-    let current_cstr = unsafe { ::std::ffi::CStr::from_ptr(current.as_ptr()) };
-    let v2_len = current_cstr.to_bytes().len();
-    if v1_len <= v2_len {
-        let valuestring_start = valuestring.as_ptr();
-        let valuestring_end = valuestring_start.wrapping_add(v1_len);
-        let current_start: *const ::core::ffi::c_char = current.as_ptr();
-        let current_end = current_start.wrapping_add(v2_len);
-        if !(valuestring_end < current_start || current_end < valuestring_start) {
-            return None;
-        }
-        let bytes = valuestring.to_bytes_with_nul();
-        unsafe {
-            ::core::ptr::copy_nonoverlapping(
-                bytes.as_ptr().cast::<::core::ffi::c_char>(),
-                current.as_ptr(),
-                bytes.len(),
-            );
-        }
-        return Some(current);
-    }
-    let hooks = get_global_hooks();
-    let copy = cJSON_strdup(Some(valuestring), &hooks)?;
-    if !object.valuestring.is_null() {
-        cJSON_free(object.valuestring as *mut ::core::ffi::c_void);
-    }
-    object.valuestring = copy.as_ptr();
-    Some(copy)
+    object.valuestring.as_ref()?;
+    let copy = ::std::rc::Rc::new(valuestring.to_owned());
+    object.valuestring = Some(cJSON_ValueString::Owned(copy));
+    object.valuestring.as_ref().map(cJSON_ValueString::as_c_str)
 }
 #[export_name = "cJSON_SetValuestring"]
 pub unsafe extern "C" fn cJSON_SetValuestring_ffi(
@@ -438,9 +331,10 @@ pub unsafe extern "C" fn cJSON_SetValuestring_ffi(
         .as_mut()
         .expect("cJSON_SetValuestring received a null object pointer");
     let valuestring = ::std::ffi::CStr::from_ptr(valuestring);
-    cJSON_SetValuestring(object, valuestring)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<::core::ffi::c_char>)
+    match cJSON_SetValuestring(object, valuestring) {
+        Some(valuestring) => valuestring.as_ptr().cast_mut(),
+        None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+    }
 }
 fn ensure<'a, 'b>(
     p: &'a mut printbuffer<'b>,
@@ -507,31 +401,6 @@ fn compare_double(mut a: ::core::ffi::c_double, mut b: ::core::ffi::c_double) ->
     let mut maxVal: ::core::ffi::c_double = if a.abs() > b.abs() { a.abs() } else { b.abs() };
     return ((a - b).abs() <= maxVal * DBL_EPSILON) as ::core::ffi::c_int;
 }
-fn trim_number_fraction(mut number: String) -> String {
-    if let Some(exponent_start) = number.find('e') {
-        let exponent = number.split_off(exponent_start);
-        if number.contains('.') {
-            while number.ends_with('0') {
-                number.pop();
-            }
-            if number.ends_with('.') {
-                number.pop();
-            }
-        }
-        number.push_str(&exponent);
-        number
-    } else {
-        if number.contains('.') {
-            while number.ends_with('0') {
-                number.pop();
-            }
-            if number.ends_with('.') {
-                number.pop();
-            }
-        }
-        number
-    }
-}
 fn normalize_number_exponent(number: String) -> String {
     let Some(exponent_start) = number.find('e') else {
         return number;
@@ -550,48 +419,40 @@ fn normalize_number_exponent(number: String) -> String {
     normalized.push_str(&abs_exponent.to_string());
     normalized
 }
+fn format_number_g(
+    number: ::core::ffi::c_double,
+    precision: usize,
+) -> Option<String> {
+    let format = match precision {
+        15 => "%1.15g",
+        17 => "%1.17g",
+        _ => return None,
+    };
+    sprintf::vsprintf(format, &[&number as &dyn sprintf::Printf])
+        .ok()
+        .map(normalize_number_exponent)
+}
 fn print_number(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
-    let mut d: ::core::ffi::c_double = item.valuedouble;
-    macro_rules! format_number_g {
-        ($number:expr, $precision:expr) => {{
-            let number = $number;
-            let precision = $precision;
-            if number == 0.0 {
-                "0".to_string()
-            } else {
-                let exponent = number.abs().log10().floor() as ::core::ffi::c_int;
-                let use_exponent = exponent < -4 || exponent >= precision as ::core::ffi::c_int;
-                let mut formatted = if use_exponent {
-                    format!("{:.*e}", precision.saturating_sub(1), number)
-                } else {
-                    let fraction_digits = if exponent >= 0 {
-                        precision.saturating_sub(exponent as usize + 1)
-                    } else {
-                        precision
-                            .saturating_sub(1)
-                            .wrapping_add((-exponent) as usize)
-                    };
-                    format!("{:.*}", fraction_digits, number)
-                };
-                formatted = trim_number_fraction(formatted);
-                normalize_number_exponent(formatted)
-            }
-        }};
-    }
-    let mut number_bytes = if d != d || d - d != d - d && !(d != d) {
+    let d: ::core::ffi::c_double = item.valuedouble;
+    let mut number_bytes = if !d.is_finite() {
         b"null".to_vec()
     } else if d == item.valueint as ::core::ffi::c_double {
         let integer = item.valueint.to_string();
         integer.into_bytes()
     } else {
-        let formatted = format_number_g!(d, 15usize);
-        let parsed = formatted.parse::<::core::ffi::c_double>();
-        let selected = if parsed
+        let Some(formatted) = format_number_g(d, 15) else {
+            return false_0;
+        };
+        let selected = if formatted
+            .parse::<::core::ffi::c_double>()
             .map(|parsed| compare_double(parsed, d))
             .unwrap_or(false_0)
             == 0
         {
-            format_number_g!(d, 17usize)
+            let Some(formatted) = format_number_g(d, 17) else {
+                return false_0;
+            };
+            formatted
         } else {
             formatted
         };
@@ -748,27 +609,9 @@ fn parse_string(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_
     let allocation_length = input_end.wrapping_sub(start).wrapping_sub(skipped_bytes);
     let output_size = allocation_length
         .wrapping_add(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as size_t);
-    let output = unsafe {
-        input_buffer
-            .hooks
-            .allocate
-            .expect("non-null function pointer")(output_size)
-    } as *mut ::core::ffi::c_uchar;
-    let Some(output) = ::core::ptr::NonNull::new(output) else {
-        input_buffer.offset = failure_offset;
-        return false_0;
-    };
 
     let mut output_bytes = ::std::vec::Vec::new();
     if output_bytes.try_reserve_exact(output_size).is_err() {
-        unsafe {
-            input_buffer
-                .hooks
-                .deallocate
-                .expect("non-null function pointer")(
-                output.as_ptr() as *mut ::core::ffi::c_void
-            );
-        }
         input_buffer.offset = failure_offset;
         return false_0;
     }
@@ -782,14 +625,6 @@ fn parse_string(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_
         }
 
         if input_position.wrapping_add(1 as size_t) >= input_end {
-            unsafe {
-                input_buffer
-                    .hooks
-                    .deallocate
-                    .expect("non-null function pointer")(
-                    output.as_ptr() as *mut ::core::ffi::c_void
-                );
-            }
             input_buffer.offset = input_position;
             return false_0;
         }
@@ -808,14 +643,6 @@ fn parse_string(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_
                 let Some((decoded_length, utf8_bytes, utf8_length)) =
                     utf16_literal_to_utf8(&content[input_position..input_end])
                 else {
-                    unsafe {
-                        input_buffer
-                            .hooks
-                            .deallocate
-                            .expect("non-null function pointer")(
-                            output.as_ptr() as *mut ::core::ffi::c_void,
-                        );
-                    }
                     input_buffer.offset = input_position;
                     return false_0;
                 };
@@ -823,14 +650,6 @@ fn parse_string(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_
                 output_bytes.extend_from_slice(&utf8_bytes[..utf8_length as usize]);
             }
             _ => {
-                unsafe {
-                    input_buffer
-                        .hooks
-                        .deallocate
-                        .expect("non-null function pointer")(
-                        output.as_ptr() as *mut ::core::ffi::c_void
-                    );
-                }
                 input_buffer.offset = input_position;
                 return false_0;
             }
@@ -839,27 +658,20 @@ fn parse_string(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_
     }
 
     output_bytes.push(b'\0');
-    unsafe {
-        ::core::ptr::copy_nonoverlapping(
-            output_bytes.as_ptr(),
-            output.as_ptr(),
-            output_bytes.len(),
-        );
-    }
+    let Ok(output) = ::std::ffi::CString::from_vec_with_nul(output_bytes) else {
+        input_buffer.offset = failure_offset;
+        return false_0;
+    };
     item.type_0 = cJSON_String;
-    item.valuestring = output.as_ptr() as *mut ::core::ffi::c_char;
+    item.valuestring = Some(cJSON_ValueString::Owned(::std::rc::Rc::new(output)));
     input_buffer.offset = input_end.wrapping_add(1 as size_t);
     return true_0;
 }
 fn print_string_ptr(
-    input: *const ::core::ffi::c_uchar,
+    input: Option<&::std::ffi::CStr>,
     output_buffer: &mut printbuffer,
 ) -> cJSON_bool {
-    let input_bytes = if input.is_null() {
-        None
-    } else {
-        Some(unsafe { ::std::ffi::CStr::from_ptr(input.cast::<::core::ffi::c_char>()) }.to_bytes())
-    };
+    let input_bytes = input.map(::std::ffi::CStr::to_bytes);
     let output_length = input_bytes
         .map(|input_bytes| {
             input_bytes.iter().fold(3usize, |length, byte| {
@@ -914,7 +726,8 @@ fn print_string_ptr(
     return true_0;
 }
 fn print_string(item: &cJSON, p: &mut printbuffer) -> cJSON_bool {
-    return print_string_ptr(item.valuestring as *mut ::core::ffi::c_uchar, p);
+    let valuestring = item.valuestring.as_ref().map(cJSON_ValueString::as_c_str);
+    return print_string_ptr(valuestring, p);
 }
 fn buffer_skip_whitespace(buffer: &mut parse_buffer<'_>) {
     if buffer.offset.wrapping_add(0 as size_t) >= buffer.length {
@@ -946,7 +759,7 @@ fn skip_utf8_bom(content: &[::core::ffi::c_uchar], offset: &mut size_t) {
 fn cJSON_ParseWithOpts(
     value: Option<&::std::ffi::CStr>,
     require_null_terminated: cJSON_bool,
-) -> (Option<::core::ptr::NonNull<cJSON>>, Option<size_t>) {
+) -> (Option<Box<cJSON>>, Option<size_t>) {
     let value_addr = value
         .map(|value| value.as_ptr().addr())
         .unwrap_or(0 as size_t);
@@ -964,51 +777,42 @@ pub unsafe extern "C" fn cJSON_ParseWithOpts_ffi(
     } else {
         Some(::std::ffi::CStr::from_ptr(value))
     };
-    let result = cJSON_ParseWithOpts(value, require_null_terminated);
-    if let (Some(offset), Some(return_parse_end)) = (result.1, return_parse_end.as_mut()) {
+    let (item, parse_end) = cJSON_ParseWithOpts(value, require_null_terminated);
+    if let (Some(offset), Some(return_parse_end)) = (parse_end, return_parse_end.as_mut()) {
         *return_parse_end = value
             .map(::std::ffi::CStr::as_ptr)
             .unwrap_or_else(::core::ptr::null::<::core::ffi::c_char>)
             .wrapping_add(offset);
     }
-    result
-        .0
-        .map(::core::ptr::NonNull::as_ptr)
+    item.map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
 fn cJSON_ParseWithLengthOpts(
     value: Option<&[::core::ffi::c_uchar]>,
     value_addr: size_t,
     require_null_terminated: cJSON_bool,
-) -> (Option<::core::ptr::NonNull<cJSON>>, Option<size_t>) {
+) -> (Option<Box<cJSON>>, Option<size_t>) {
     let mut c2rust_current_block: u64;
     let mut buffer: parse_buffer = parse_buffer {
         content: &[],
         length: 0 as size_t,
         offset: 0 as size_t,
         depth: 0 as size_t,
-        hooks: internal_hooks {
-            allocate: None,
-            deallocate: None,
-            reallocate: None,
-        },
     };
-    let mut item: Option<::core::ptr::NonNull<cJSON>> = None;
+    let mut item: Option<Box<cJSON>> = None;
     GLOBAL_ERROR_JSON_ADDR.store(0 as size_t, ::core::sync::atomic::Ordering::Relaxed);
     GLOBAL_ERROR_POSITION.store(0 as size_t, ::core::sync::atomic::Ordering::Relaxed);
     if let Some(value) = value {
         buffer.content = value;
         buffer.length = value.len();
         buffer.offset = 0 as size_t;
-        buffer.hooks = get_global_hooks();
         if !buffer.content.is_empty() {
             let mut parsed = false;
-            let hooks = buffer.hooks;
-            item = cJSON_New_Item(&hooks, |item| {
+            item = Some(cJSON_New_Item_Box(|item| {
                 skip_utf8_bom(buffer.content, &mut buffer.offset);
                 buffer_skip_whitespace(&mut buffer);
                 parsed = parse_value(item, &mut buffer) != 0;
-            });
+            }));
             if item.is_some() {
                 if parsed {
                     if require_null_terminated != 0 {
@@ -1034,7 +838,7 @@ fn cJSON_ParseWithLengthOpts(
         }
     }
     if let Some(item) = item {
-        cJSON_Delete(item.as_ptr());
+        drop(item);
     }
     if value.is_some() {
         let mut local_error: error = error {
@@ -1076,13 +880,12 @@ pub unsafe extern "C" fn cJSON_ParseWithLengthOpts_ffi(
             buffer_length,
         ))
     };
-    let result = cJSON_ParseWithLengthOpts(value_slice, value.addr(), require_null_terminated);
-    if let (Some(offset), Some(return_parse_end)) = (result.1, return_parse_end.as_mut()) {
+    let (item, parse_end) =
+        cJSON_ParseWithLengthOpts(value_slice, value.addr(), require_null_terminated);
+    if let (Some(offset), Some(return_parse_end)) = (parse_end, return_parse_end.as_mut()) {
         *return_parse_end = value.wrapping_add(offset);
     }
-    result
-        .0
-        .map(::core::ptr::NonNull::as_ptr)
+    item.map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
 #[export_name = "cJSON_Parse"]
@@ -1094,7 +897,7 @@ pub unsafe extern "C" fn cJSON_Parse_ffi(mut value: *const ::core::ffi::c_char) 
     };
     cJSON_ParseWithOpts(value, 0 as cJSON_bool)
         .0
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
 #[export_name = "cJSON_ParseWithLength"]
@@ -1114,18 +917,23 @@ pub unsafe extern "C" fn cJSON_ParseWithLength_ffi(
     };
     cJSON_ParseWithLengthOpts(value_slice, value.addr(), 0 as cJSON_bool)
         .0
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-fn print(
-    item: Option<&cJSON>,
-    mut format: cJSON_bool,
-    hooks: &internal_hooks,
-) -> *mut ::core::ffi::c_uchar {
+fn owned_c_string(input: &::std::ffi::CStr) -> Option<::std::ffi::CString> {
+    let mut owned = ::std::vec::Vec::new();
+    let input = input.to_bytes_with_nul();
+    if owned.try_reserve_exact(input.len()).is_err() {
+        return None;
+    }
+    owned.extend_from_slice(input);
+    ::std::ffi::CString::from_vec_with_nul(owned).ok()
+}
+fn print(item: Option<&cJSON>, format: cJSON_bool) -> Option<::std::ffi::CString> {
     const DEFAULT_BUFFER_SIZE: size_t = 256 as size_t;
     let mut backing = ::std::vec::Vec::new();
     if backing.try_reserve_exact(DEFAULT_BUFFER_SIZE).is_err() {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        return None;
     }
     backing.resize(DEFAULT_BUFFER_SIZE, 0);
     let mut buffer = printbuffer {
@@ -1135,47 +943,71 @@ fn print(
         format,
     };
     let Some(item) = item else {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        return None;
     };
     if print_value(item, &mut buffer) == 0 {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        return None;
     }
     update_offset(&mut buffer);
     let Some(end) = buffer.offset.checked_add(1) else {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        return None;
     };
     let Some(bytes) = printbuffer_bytes(&buffer).get(..end) else {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        return None;
     };
     let Ok(printed) = ::std::ffi::CStr::from_bytes_with_nul(bytes) else {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        return None;
     };
-    match cJSON_strdup(Some(printed), hooks) {
-        Some(printed) => printed.as_ptr().cast::<::core::ffi::c_uchar>(),
-        None => ::core::ptr::null_mut::<::core::ffi::c_uchar>(),
-    }
+    owned_c_string(printed)
 }
 #[export_name = "cJSON_Print"]
 pub unsafe extern "C" fn cJSON_Print_ffi(mut item: *const cJSON) -> *mut ::core::ffi::c_char {
     let hooks = get_global_hooks();
-    print(item.as_ref(), true_0, &hooks) as *mut ::core::ffi::c_char
+    let Some(printed) = print(item.as_ref(), true_0) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let bytes = printed.as_bytes_with_nul();
+    let copy =
+        hooks.allocate.expect("non-null function pointer")(bytes.len()) as *mut ::core::ffi::c_char;
+    let Some(copy) = ::core::ptr::NonNull::new(copy) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    ::core::ptr::copy_nonoverlapping(
+        bytes.as_ptr().cast::<::core::ffi::c_char>(),
+        copy.as_ptr(),
+        bytes.len(),
+    );
+    copy.as_ptr()
 }
 #[export_name = "cJSON_PrintUnformatted"]
 pub unsafe extern "C" fn cJSON_PrintUnformatted_ffi(
     mut item: *const cJSON,
 ) -> *mut ::core::ffi::c_char {
     let hooks = get_global_hooks();
-    print(item.as_ref(), false_0, &hooks) as *mut ::core::ffi::c_char
+    let Some(printed) = print(item.as_ref(), false_0) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let bytes = printed.as_bytes_with_nul();
+    let copy =
+        hooks.allocate.expect("non-null function pointer")(bytes.len()) as *mut ::core::ffi::c_char;
+    let Some(copy) = ::core::ptr::NonNull::new(copy) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    ::core::ptr::copy_nonoverlapping(
+        bytes.as_ptr().cast::<::core::ffi::c_char>(),
+        copy.as_ptr(),
+        bytes.len(),
+    );
+    copy.as_ptr()
 }
 pub fn cJSON_PrintBuffered(
     item: Option<&cJSON>,
     prebuffer: ::core::ffi::c_int,
     fmt: cJSON_bool,
-) -> Option<::core::ptr::NonNull<::core::ffi::c_char>> {
+) -> Option<::std::ffi::CString> {
     if prebuffer < 0 as ::core::ffi::c_int {
         return None;
     }
-    let hooks = get_global_hooks();
     let mut backing = ::std::vec::Vec::new();
     if backing.try_reserve_exact(prebuffer as usize).is_err() {
         return None;
@@ -1197,7 +1029,7 @@ pub fn cJSON_PrintBuffered(
     let end = p.offset.checked_add(1)?;
     let bytes = printbuffer_bytes(&p).get(..end)?;
     let printed = ::std::ffi::CStr::from_bytes_with_nul(bytes).ok()?;
-    cJSON_strdup(Some(printed), &hooks)
+    owned_c_string(printed)
 }
 #[export_name = "cJSON_PrintBuffered"]
 pub unsafe extern "C" fn cJSON_PrintBuffered_ffi(
@@ -1208,9 +1040,22 @@ pub unsafe extern "C" fn cJSON_PrintBuffered_ffi(
     if prebuffer < 0 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    cJSON_PrintBuffered(item.as_ref(), prebuffer, fmt)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<::core::ffi::c_char>)
+    let hooks = get_global_hooks();
+    let Some(printed) = cJSON_PrintBuffered(item.as_ref(), prebuffer, fmt) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let bytes = printed.as_bytes_with_nul();
+    let copy =
+        hooks.allocate.expect("non-null function pointer")(bytes.len()) as *mut ::core::ffi::c_char;
+    let Some(copy) = ::core::ptr::NonNull::new(copy) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    ::core::ptr::copy_nonoverlapping(
+        bytes.as_ptr().cast::<::core::ffi::c_char>(),
+        copy.as_ptr(),
+        bytes.len(),
+    );
+    copy.as_ptr()
 }
 pub fn cJSON_PrintPreallocated(
     item: Option<&cJSON>,
@@ -1311,10 +1156,10 @@ fn print_value(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
         }
         cJSON_Number => return print_number(item, output_buffer),
         cJSON_Raw => {
-            if item.valuestring.is_null() {
+            let Some(valuestring) = item.valuestring.as_ref() else {
                 return false_0;
-            }
-            let raw = unsafe { ::std::ffi::CStr::from_ptr(item.valuestring) }.to_bytes_with_nul();
+            };
+            let raw = valuestring.as_c_str().to_bytes_with_nul();
             let Some(output) = ensure(output_buffer, raw.len() as size_t) else {
                 return false_0;
             };
@@ -1327,10 +1172,18 @@ fn print_value(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
         _ => return false_0,
     };
 }
+#[inline(never)]
+fn adopt_child_values(parent: &mut cJSON, children: Vec<cJSON>) {
+    parent.children = children;
+    parent.reference_child = None;
+}
+#[inline(never)]
+fn delete_child_values(children: Vec<cJSON>) {
+    drop(children);
+}
 fn parse_array(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_bool {
     let mut c2rust_current_block: u64;
-    let mut head: *mut cJSON = ::core::ptr::null_mut::<cJSON>();
-    let mut current_item: *mut cJSON = ::core::ptr::null_mut::<cJSON>();
+    let mut children = Vec::new();
     if input_buffer.depth >= CJSON_NESTING_LIMIT as size_t {
         return false_0;
     }
@@ -1348,32 +1201,15 @@ fn parse_array(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_b
         } else {
             input_buffer.offset = input_buffer.offset.wrapping_sub(1);
             loop {
-                let Some(new_item) = cJSON_New_Item(&input_buffer.hooks, |_| {}) else {
-                    c2rust_current_block = 1336238348363633231;
-                    break;
-                };
-                let new_item = new_item.as_ptr();
-                if head.is_null() {
-                    head = new_item;
-                    current_item = head;
-                } else {
-                    unsafe {
-                        (*current_item).next = new_item as *mut cJSON;
-                        (*new_item).prev = current_item as *mut cJSON;
-                    }
-                    current_item = new_item;
-                }
+                let mut new_item = cJSON_New_Item(|_| {});
+                let new_item_ref = &mut new_item;
                 input_buffer.offset = input_buffer.offset.wrapping_add(1);
                 buffer_skip_whitespace(input_buffer);
-                if parse_value(
-                    unsafe { current_item.as_mut() }
-                        .expect("parse_array received a null current item"),
-                    input_buffer,
-                ) == 0
-                {
+                if parse_value(new_item_ref, input_buffer) == 0 {
                     c2rust_current_block = 1336238348363633231;
                     break;
                 }
+                children.push(new_item);
                 buffer_skip_whitespace(input_buffer);
                 if !(input_buffer.offset.wrapping_add(0 as size_t) < input_buffer.length
                     && input_buffer.content[input_buffer.offset] as ::core::ffi::c_int
@@ -1401,38 +1237,31 @@ fn parse_array(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_b
             1336238348363633231 => {}
             _ => {
                 input_buffer.depth = input_buffer.depth.wrapping_sub(1);
-                if !head.is_null() {
-                    unsafe {
-                        (*head).prev = current_item as *mut cJSON;
-                    }
-                }
                 item.type_0 = cJSON_Array;
-                item.child = head as *mut cJSON;
+                adopt_child_values(item, children);
                 input_buffer.offset = input_buffer.offset.wrapping_add(1);
                 return true_0;
             }
         }
     }
-    if !head.is_null() {
-        cJSON_Delete(head);
-    }
+    delete_child_values(children);
     return false_0;
 }
 fn print_array(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
     let mut length: size_t = 0 as size_t;
-    let mut current_element: *mut cJSON = item.child as *mut cJSON;
     let Some(output) = ensure(output_buffer, 1 as size_t) else {
         return false_0;
     };
     output[0] = b'[';
     output_buffer.offset = output_buffer.offset.wrapping_add(1);
     output_buffer.depth = output_buffer.depth.wrapping_add(1);
-    while !current_element.is_null() {
-        if print_value(unsafe { &*current_element }, output_buffer) == 0 {
+    let mut index = 0 as size_t;
+    while let Some(current) = get_array_item(Some(item), index) {
+        if print_value(current, output_buffer) == 0 {
             return false_0;
         }
         update_offset(output_buffer);
-        if unsafe { !(*current_element).next.is_null() } {
+        if get_array_item(Some(item), index.wrapping_add(1 as size_t)).is_some() {
             length = (if output_buffer.format != 0 {
                 2 as ::core::ffi::c_int
             } else {
@@ -1451,7 +1280,7 @@ fn print_array(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
             output[written] = b'\0';
             output_buffer.offset = output_buffer.offset.wrapping_add(length);
         }
-        current_element = unsafe { (*current_element).next as *mut cJSON };
+        index = index.wrapping_add(1 as size_t);
     }
     let Some(output) = ensure(output_buffer, 2 as size_t) else {
         return false_0;
@@ -1463,8 +1292,7 @@ fn print_array(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
 }
 fn parse_object(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_bool {
     let mut c2rust_current_block: u64;
-    let mut head: *mut cJSON = ::core::ptr::null_mut::<cJSON>();
-    let mut current_item: *mut cJSON = ::core::ptr::null_mut::<cJSON>();
+    let mut children = Vec::new();
     if input_buffer.depth >= CJSON_NESTING_LIMIT as size_t {
         return false_0;
     }
@@ -1484,72 +1312,43 @@ fn parse_object(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_
         } else {
             input_buffer.offset = input_buffer.offset.wrapping_sub(1);
             loop {
-                let Some(new_item) = cJSON_New_Item(&input_buffer.hooks, |_| {}) else {
+                let mut new_item = cJSON_New_Item(|_| {});
+                let new_item_ref = &mut new_item;
+                if !(input_buffer.offset.wrapping_add(1 as size_t) < input_buffer.length) {
                     c2rust_current_block = 9990476168629568694;
                     break;
-                };
-                let new_item = new_item.as_ptr();
-                {
-                    if head.is_null() {
-                        head = new_item;
-                        current_item = head;
-                    } else {
-                        unsafe {
-                            (*current_item).next = new_item as *mut cJSON;
-                            (*new_item).prev = current_item as *mut cJSON;
-                        }
-                        current_item = new_item;
-                    }
-                    if !(input_buffer.offset.wrapping_add(1 as size_t) < input_buffer.length) {
+                } else {
+                    input_buffer.offset = input_buffer.offset.wrapping_add(1);
+                    buffer_skip_whitespace(input_buffer);
+                    if parse_string(new_item_ref, input_buffer) == 0 {
                         c2rust_current_block = 9990476168629568694;
                         break;
                     } else {
-                        input_buffer.offset = input_buffer.offset.wrapping_add(1);
                         buffer_skip_whitespace(input_buffer);
-                        if parse_string(
-                            unsafe { current_item.as_mut() }
-                                .expect("parse_object received a null current item"),
-                            input_buffer,
-                        ) == 0
+                        new_item_ref.string = new_item_ref.valuestring.take();
+                        if !(input_buffer.offset.wrapping_add(0 as size_t) < input_buffer.length)
+                            || input_buffer.content[input_buffer.offset] as ::core::ffi::c_int
+                                != ':' as i32
                         {
                             c2rust_current_block = 9990476168629568694;
                             break;
                         } else {
+                            input_buffer.offset = input_buffer.offset.wrapping_add(1);
                             buffer_skip_whitespace(input_buffer);
-                            unsafe {
-                                (*current_item).string = (*current_item).valuestring;
-                                (*current_item).valuestring =
-                                    ::core::ptr::null_mut::<::core::ffi::c_char>();
-                            }
-                            if !(input_buffer.offset.wrapping_add(0 as size_t)
-                                < input_buffer.length)
-                                || input_buffer.content[input_buffer.offset] as ::core::ffi::c_int
-                                    != ':' as i32
-                            {
+                            if parse_value(new_item_ref, input_buffer) == 0 {
                                 c2rust_current_block = 9990476168629568694;
                                 break;
                             } else {
-                                input_buffer.offset = input_buffer.offset.wrapping_add(1);
+                                children.push(new_item);
                                 buffer_skip_whitespace(input_buffer);
-                                if parse_value(
-                                    unsafe { current_item.as_mut() }
-                                        .expect("parse_object received a null current item"),
-                                    input_buffer,
-                                ) == 0
+                                if !(input_buffer.offset.wrapping_add(0 as size_t)
+                                    < input_buffer.length
+                                    && input_buffer.content[input_buffer.offset]
+                                        as ::core::ffi::c_int
+                                        == ',' as i32)
                                 {
-                                    c2rust_current_block = 9990476168629568694;
+                                    c2rust_current_block = 14359455889292382949;
                                     break;
-                                } else {
-                                    buffer_skip_whitespace(input_buffer);
-                                    if !(input_buffer.offset.wrapping_add(0 as size_t)
-                                        < input_buffer.length
-                                        && input_buffer.content[input_buffer.offset]
-                                            as ::core::ffi::c_int
-                                            == ',' as i32)
-                                    {
-                                        c2rust_current_block = 14359455889292382949;
-                                        break;
-                                    }
                                 }
                             }
                         }
@@ -1574,26 +1373,18 @@ fn parse_object(item: &mut cJSON, input_buffer: &mut parse_buffer<'_>) -> cJSON_
             9990476168629568694 => {}
             _ => {
                 input_buffer.depth = input_buffer.depth.wrapping_sub(1);
-                if !head.is_null() {
-                    unsafe {
-                        (*head).prev = current_item as *mut cJSON;
-                    }
-                }
                 item.type_0 = cJSON_Object;
-                item.child = head as *mut cJSON;
+                adopt_child_values(item, children);
                 input_buffer.offset = input_buffer.offset.wrapping_add(1);
                 return true_0;
             }
         }
     }
-    if !head.is_null() {
-        cJSON_Delete(head);
-    }
+    delete_child_values(children);
     return false_0;
 }
 fn print_object(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
     let mut length: size_t = 0 as size_t;
-    let mut current_item: *mut cJSON = item.child as *mut cJSON;
     length = (if output_buffer.format != 0 {
         2 as ::core::ffi::c_int
     } else {
@@ -1609,7 +1400,8 @@ fn print_object(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
     }
     output_buffer.depth = output_buffer.depth.wrapping_add(1);
     output_buffer.offset = output_buffer.offset.wrapping_add(length);
-    while !current_item.is_null() {
+    let mut index = 0 as size_t;
+    while let Some(current) = get_array_item(Some(item), index) {
         if output_buffer.format != 0 {
             let depth = output_buffer.depth;
             let Some(output) = ensure(output_buffer, depth) else {
@@ -1618,7 +1410,7 @@ fn print_object(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
             output.fill(b'\t');
             output_buffer.offset = output_buffer.offset.wrapping_add(depth);
         }
-        let current_string = unsafe { (*current_item).string as *mut ::core::ffi::c_uchar };
+        let current_string = current.string.as_ref().map(cJSON_ValueString::as_c_str);
         if print_string_ptr(current_string, output_buffer) == 0 {
             return false_0;
         }
@@ -1637,11 +1429,11 @@ fn print_object(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
             output[1] = b'\t';
         }
         output_buffer.offset = output_buffer.offset.wrapping_add(length);
-        if print_value(unsafe { &*current_item }, output_buffer) == 0 {
+        if print_value(current, output_buffer) == 0 {
             return false_0;
         }
         update_offset(output_buffer);
-        let has_next = unsafe { !(*current_item).next.is_null() };
+        let has_next = get_array_item(Some(item), index.wrapping_add(1 as size_t)).is_some();
         length = ((if output_buffer.format != 0 {
             1 as ::core::ffi::c_int
         } else {
@@ -1662,10 +1454,8 @@ fn print_object(item: &cJSON, output_buffer: &mut printbuffer) -> cJSON_bool {
             written += 1;
         }
         output[written] = b'\0';
-        unsafe {
-            current_item = (*current_item).next as *mut cJSON;
-        }
         output_buffer.offset = output_buffer.offset.wrapping_add(length);
+        index = index.wrapping_add(1 as size_t);
     }
     let format = output_buffer.format != 0;
     let depth = output_buffer.depth;
@@ -1693,12 +1483,8 @@ pub fn cJSON_GetArraySize(array: Option<&cJSON>) -> ::core::ffi::c_int {
         return 0 as ::core::ffi::c_int;
     };
     let mut size: size_t = 0 as size_t;
-    let mut child = array.child;
-    unsafe {
-        while !child.is_null() {
-            size = size.wrapping_add(1);
-            child = (*child).next as *mut cJSON;
-        }
+    while get_array_item(Some(array), size).is_some() {
+        size = size.wrapping_add(1 as size_t);
     }
     return size as ::core::ffi::c_int;
 }
@@ -1706,21 +1492,24 @@ pub fn cJSON_GetArraySize(array: Option<&cJSON>) -> ::core::ffi::c_int {
 pub unsafe extern "C" fn cJSON_GetArraySize_ffi(mut array: *const cJSON) -> ::core::ffi::c_int {
     cJSON_GetArraySize(array.as_ref())
 }
-fn get_array_item(array: Option<&cJSON>, mut index: size_t) -> Option<::core::ptr::NonNull<cJSON>> {
-    let array = array?;
-    let mut current_child = array.child;
-    unsafe {
-        while !current_child.is_null() && index > 0 as size_t {
-            index = index.wrapping_sub(1);
-            current_child = (*current_child).next as *mut cJSON;
-        }
+fn first_child(item: &cJSON) -> Option<&cJSON> {
+    if item.type_0 & cJSON_IsReference != 0 {
+        item.reference_child.or_else(|| item.children.first())
+    } else {
+        item.children.first()
     }
-    ::core::ptr::NonNull::new(current_child)
 }
-pub fn cJSON_GetArrayItem(
-    array: Option<&cJSON>,
-    index: ::core::ffi::c_int,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+fn get_array_item<'a>(array: Option<&'a cJSON>, mut index: size_t) -> Option<&'a cJSON> {
+    let array = array?;
+    if array.type_0 & cJSON_IsReference != 0 {
+        if index == 0 {
+            return array.reference_child.or_else(|| array.children.first());
+        }
+        return None;
+    }
+    array.children.get(index as usize)
+}
+pub fn cJSON_GetArrayItem(array: Option<&cJSON>, index: ::core::ffi::c_int) -> Option<&cJSON> {
     if index < 0 as ::core::ffi::c_int {
         return None;
     }
@@ -1731,56 +1520,52 @@ pub unsafe extern "C" fn cJSON_GetArrayItem_ffi(
     mut array: *const cJSON,
     mut index: ::core::ffi::c_int,
 ) -> *mut cJSON {
-    cJSON_GetArrayItem(array.as_ref(), index)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
+    match cJSON_GetArrayItem(array.as_ref(), index) {
+        Some(item) => ::core::ptr::from_ref(item).cast_mut(),
+        None => ::core::ptr::null_mut::<cJSON>(),
+    }
 }
 enum ObjectItemName<'a> {
     CStr(&'a ::std::ffi::CStr),
     ItemString(&'a cJSON),
 }
-fn get_object_item(
-    object: &cJSON,
+fn get_object_item<'a>(
+    object: &'a cJSON,
     name: Option<ObjectItemName<'_>>,
     case_sensitive: cJSON_bool,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+) -> Option<&'a cJSON> {
     let name = name?;
-    let mut current_element = object.child;
-    unsafe {
-        let name = match name {
-            ObjectItemName::CStr(name) => name,
-            ObjectItemName::ItemString(item) => {
-                if item.string.is_null() {
-                    return None;
-                }
-                ::std::ffi::CStr::from_ptr(item.string)
+    let name = match name {
+        ObjectItemName::CStr(name) => name,
+        ObjectItemName::ItemString(item) => item.string.as_ref()?.as_c_str(),
+    };
+    let mut index = 0 as size_t;
+    while let Some(current) = get_array_item(Some(object), index) {
+        let current_string = current.string.as_ref();
+        if current_string.is_none() {
+            if case_sensitive != 0 {
+                return None;
             }
-        };
-        while !current_element.is_null() {
-            let current_string = (*current_element).string;
-            if current_string.is_null() {
-                if case_sensitive != 0 {
-                    return None;
-                }
+        } else {
+            let current_name = current_string
+                .expect("checked non-null object key")
+                .as_c_str();
+            if if case_sensitive != 0 {
+                name.to_bytes_with_nul() == current_name.to_bytes_with_nul()
             } else {
-                let current_name = ::std::ffi::CStr::from_ptr(current_string);
-                if if case_sensitive != 0 {
-                    name.to_bytes_with_nul() == current_name.to_bytes_with_nul()
-                } else {
-                    case_insensitive_strcmp(name, current_name) == 0 as ::core::ffi::c_int
-                } {
-                    return ::core::ptr::NonNull::new(current_element);
-                }
+                case_insensitive_strcmp(name, current_name) == 0 as ::core::ffi::c_int
+            } {
+                return Some(current);
             }
-            current_element = (*current_element).next as *mut cJSON;
         }
+        index = index.wrapping_add(1 as size_t);
     }
     None
 }
-pub fn cJSON_GetObjectItem(
-    object: Option<&cJSON>,
+pub fn cJSON_GetObjectItem<'a>(
+    object: Option<&'a cJSON>,
     string: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+) -> Option<&'a cJSON> {
     get_object_item(object?, string.map(ObjectItemName::CStr), false_0)
 }
 #[export_name = "cJSON_GetObjectItem"]
@@ -1793,14 +1578,15 @@ pub unsafe extern "C" fn cJSON_GetObjectItem_ffi(
     } else {
         Some(::std::ffi::CStr::from_ptr(string))
     };
-    cJSON_GetObjectItem(object.as_ref(), string)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
+    match cJSON_GetObjectItem(object.as_ref(), string) {
+        Some(item) => ::core::ptr::from_ref(item).cast_mut(),
+        None => ::core::ptr::null_mut::<cJSON>(),
+    }
 }
-pub fn cJSON_GetObjectItemCaseSensitive(
-    object: Option<&cJSON>,
+pub fn cJSON_GetObjectItemCaseSensitive<'a>(
+    object: Option<&'a cJSON>,
     string: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+) -> Option<&'a cJSON> {
     get_object_item(object?, string.map(ObjectItemName::CStr), true_0)
 }
 #[export_name = "cJSON_GetObjectItemCaseSensitive"]
@@ -1813,9 +1599,10 @@ pub unsafe extern "C" fn cJSON_GetObjectItemCaseSensitive_ffi(
     } else {
         Some(::std::ffi::CStr::from_ptr(string))
     };
-    cJSON_GetObjectItemCaseSensitive(object.as_ref(), string)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
+    match cJSON_GetObjectItemCaseSensitive(object.as_ref(), string) {
+        Some(item) => ::core::ptr::from_ref(item).cast_mut(),
+        None => ::core::ptr::null_mut::<cJSON>(),
+    }
 }
 pub fn cJSON_HasObjectItem(
     object: Option<&cJSON>,
@@ -1839,59 +1626,21 @@ pub unsafe extern "C" fn cJSON_HasObjectItem_ffi(
     };
     cJSON_HasObjectItem(object.as_ref(), string)
 }
-fn suffix_object(prev: ::core::ptr::NonNull<cJSON>, item: ::core::ptr::NonNull<cJSON>) {
-    let prev = prev.as_ptr();
-    let item = item.as_ptr();
-    unsafe {
-        (*prev).next = item;
-        (*item).prev = prev;
-    }
-}
-fn create_reference(
-    item: Option<&cJSON>,
-    hooks: &internal_hooks,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+fn create_reference_value(item: Option<&cJSON>) -> Option<cJSON> {
     let item = item?;
-    cJSON_New_Item(hooks, |reference| {
-        *reference = *item;
-        reference.string = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    Some(cJSON_New_Item(|reference| {
+        *reference = item.clone();
+        reference.string = None;
         reference.type_0 |= cJSON_IsReference;
-        reference.prev = ::core::ptr::null_mut::<cJSON>();
-        reference.next = reference.prev;
-    })
+    }))
 }
-fn add_item_to_array(
-    mut array: ::core::ptr::NonNull<cJSON>,
-    mut item: ::core::ptr::NonNull<cJSON>,
-) -> cJSON_bool {
-    if array == item {
-        return false_0;
-    }
-    let array = array.as_ptr();
-    let item_ptr = item.as_ptr();
-    unsafe {
-        let child = (*array).child;
-        if child.is_null() {
-            (*array).child = item_ptr;
-            (*item_ptr).prev = item_ptr;
-            (*item_ptr).next = ::core::ptr::null_mut::<cJSON>();
-            return true_0;
-        }
-        if !(*child).prev.is_null() {
-            suffix_object(
-                ::core::ptr::NonNull::new((*child).prev).expect("non-null previous array item"),
-                item,
-            );
-            (*child).prev = item_ptr;
-        }
-    }
+fn add_item_to_array_value<'a>(array: &'a mut cJSON, item: cJSON) -> &'a mut cJSON {
+    array.children.push(item);
+    array.children.last_mut().expect("inserted array item")
+}
+pub fn cJSON_AddItemToArray(array: &mut cJSON, item: cJSON) -> cJSON_bool {
+    add_item_to_array_value(array, item);
     true_0
-}
-pub fn cJSON_AddItemToArray(array: &mut cJSON, item: &mut cJSON) -> cJSON_bool {
-    add_item_to_array(
-        ::core::ptr::NonNull::from(array),
-        ::core::ptr::NonNull::from(item),
-    )
 }
 #[export_name = "cJSON_AddItemToArray"]
 pub unsafe extern "C" fn cJSON_AddItemToArray_ffi(
@@ -1901,63 +1650,40 @@ pub unsafe extern "C" fn cJSON_AddItemToArray_ffi(
     if array.is_null() || item.is_null() || array == item {
         return false_0;
     }
-    let array = array
-        .as_mut()
-        .expect("cJSON_AddItemToArray received a null array pointer");
-    let item = item
-        .as_mut()
-        .expect("cJSON_AddItemToArray received a null item pointer");
+    let array = array.as_mut().expect("checked non-null array pointer");
+    let item = *Box::from_raw(item);
     cJSON_AddItemToArray(array, item)
 }
-fn add_item_to_object(
-    object: &mut cJSON,
-    string: &::std::ffi::CStr,
-    mut item: ::core::ptr::NonNull<cJSON>,
-    hooks: &internal_hooks,
-    constant_key: bool,
-) -> cJSON_bool {
-    let mut new_key: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut new_type: ::core::ffi::c_int = cJSON_Invalid;
-    if ::core::ptr::eq(object as *const cJSON, item.as_ptr() as *const cJSON) {
-        return false_0;
-    }
-    let item = unsafe { item.as_mut() };
-    if constant_key {
-        new_key = string.as_ptr().cast_mut();
-        new_type = item.type_0 | cJSON_StringIsConst;
-    } else {
-        new_key = cJSON_strdup(Some(string), hooks)
-            .map(::core::ptr::NonNull::as_ptr)
-            .unwrap_or_else(::core::ptr::null_mut::<::core::ffi::c_char>);
-        if new_key.is_null() {
-            return false_0;
-        }
-        new_type = item.type_0 & !cJSON_StringIsConst;
-    }
-    if item.type_0 & cJSON_StringIsConst == 0 && !item.string.is_null() {
-        unsafe {
-            hooks.deallocate.expect("non-null function pointer")(
-                item.string as *mut ::core::ffi::c_void,
-            );
-        }
-    }
-    item.string = new_key;
+enum ObjectKey<'a> {
+    Owned(&'a ::std::ffi::CStr),
+    Reference(&'static ::std::ffi::CStr),
+}
+fn add_item_to_object_value<'a>(
+    object: &'a mut cJSON,
+    string: ObjectKey<'_>,
+    mut item: cJSON,
+) -> &'a mut cJSON {
+    let (new_key, new_type) = match string {
+        ObjectKey::Reference(string) => (
+            cJSON_ValueString::Reference(string),
+            item.type_0 | cJSON_StringIsConst,
+        ),
+        ObjectKey::Owned(string) => (
+            cJSON_ValueString::Owned(::std::rc::Rc::new(string.to_owned())),
+            item.type_0 & !cJSON_StringIsConst,
+        ),
+    };
+    item.string = Some(new_key);
     item.type_0 = new_type;
-    return cJSON_AddItemToArray(object, item);
+    add_item_to_array_value(object, item)
 }
 pub fn cJSON_AddItemToObject(
     object: &mut cJSON,
     string: &::std::ffi::CStr,
-    item: &mut cJSON,
+    item: cJSON,
 ) -> cJSON_bool {
-    let hooks = get_global_hooks();
-    return add_item_to_object(
-        object,
-        string,
-        ::core::ptr::NonNull::from(item),
-        &hooks,
-        false,
-    );
+    add_item_to_object_value(object, ObjectKey::Owned(string), item);
+    true_0
 }
 #[export_name = "cJSON_AddItemToObject"]
 pub unsafe extern "C" fn cJSON_AddItemToObject_ffi(
@@ -1968,28 +1694,17 @@ pub unsafe extern "C" fn cJSON_AddItemToObject_ffi(
     if object.is_null() || string.is_null() || item.is_null() || object == item {
         return false_0;
     }
-    cJSON_AddItemToObject(
-        object
-            .as_mut()
-            .expect("cJSON_AddItemToObject received a null object pointer"),
-        ::std::ffi::CStr::from_ptr(string),
-        item.as_mut()
-            .expect("cJSON_AddItemToObject received a null item pointer"),
-    )
+    let object = object.as_mut().expect("checked non-null object pointer");
+    let item = *Box::from_raw(item);
+    cJSON_AddItemToObject(object, ::std::ffi::CStr::from_ptr(string), item)
 }
 pub fn cJSON_AddItemToObjectCS(
     object: &mut cJSON,
-    string: &::std::ffi::CStr,
-    item: &mut cJSON,
+    string: &'static ::std::ffi::CStr,
+    item: cJSON,
 ) -> cJSON_bool {
-    let hooks = get_global_hooks();
-    return add_item_to_object(
-        object,
-        string,
-        ::core::ptr::NonNull::from(item),
-        &hooks,
-        true,
-    );
+    add_item_to_object_value(object, ObjectKey::Reference(string), item);
+    true_0
 }
 #[export_name = "cJSON_AddItemToObjectCS"]
 pub unsafe extern "C" fn cJSON_AddItemToObjectCS_ffi(
@@ -2000,21 +1715,15 @@ pub unsafe extern "C" fn cJSON_AddItemToObjectCS_ffi(
     if object.is_null() || string.is_null() || item.is_null() || object == item {
         return false_0;
     }
-    cJSON_AddItemToObjectCS(
-        object
-            .as_mut()
-            .expect("cJSON_AddItemToObjectCS received a null object pointer"),
-        ::std::ffi::CStr::from_ptr(string),
-        item.as_mut()
-            .expect("cJSON_AddItemToObjectCS received a null item pointer"),
-    )
+    let object = object.as_mut().expect("checked non-null object pointer");
+    let item = *Box::from_raw(item);
+    cJSON_AddItemToObjectCS(object, ::std::ffi::CStr::from_ptr(string), item)
 }
-pub fn cJSON_AddItemReferenceToArray(array: &mut cJSON, item: cJSON) -> cJSON_bool {
-    let hooks = get_global_hooks();
-    let Some(reference) = create_reference(Some(&item), &hooks) else {
+pub fn cJSON_AddItemReferenceToArray(array: &mut cJSON, item: &cJSON) -> cJSON_bool {
+    let Some(reference) = create_reference_value(Some(item)) else {
         return false_0;
     };
-    return add_item_to_array(::core::ptr::NonNull::from(array), reference);
+    cJSON_AddItemToArray(array, reference)
 }
 #[export_name = "cJSON_AddItemReferenceToArray"]
 pub unsafe extern "C" fn cJSON_AddItemReferenceToArray_ffi(
@@ -2027,7 +1736,6 @@ pub unsafe extern "C" fn cJSON_AddItemReferenceToArray_ffi(
     let Some(item) = item.as_ref() else {
         return false_0;
     };
-    let item = *item;
     let Some(array) = array.as_mut() else {
         return false_0;
     };
@@ -2036,13 +1744,13 @@ pub unsafe extern "C" fn cJSON_AddItemReferenceToArray_ffi(
 pub fn cJSON_AddItemReferenceToObject(
     object: &mut cJSON,
     string: &::std::ffi::CStr,
-    item: cJSON,
+    item: &cJSON,
 ) -> cJSON_bool {
-    let hooks = get_global_hooks();
-    let Some(reference) = create_reference(Some(&item), &hooks) else {
+    let Some(reference) = create_reference_value(Some(item)) else {
         return false_0;
     };
-    return add_item_to_object(object, string, reference, &hooks, false);
+    add_item_to_object_value(object, ObjectKey::Owned(string), reference);
+    true_0
 }
 #[export_name = "cJSON_AddItemReferenceToObject"]
 pub unsafe extern "C" fn cJSON_AddItemReferenceToObject_ffi(
@@ -2056,29 +1764,24 @@ pub unsafe extern "C" fn cJSON_AddItemReferenceToObject_ffi(
     let Some(item) = item.as_ref() else {
         return false_0;
     };
-    let item = *item;
     let Some(object) = object.as_mut() else {
         return false_0;
     };
     cJSON_AddItemReferenceToObject(object, ::std::ffi::CStr::from_ptr(string), item)
 }
-pub fn cJSON_AddNullToObject(
-    object: Option<&mut cJSON>,
+pub fn cJSON_AddNullToObject<'a>(
+    object: Option<&'a mut cJSON>,
     name: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let Some(null) = cJSON_CreateNull() else {
-        return None;
-    };
+) -> Option<&'a mut cJSON> {
+    let null = cJSON_New_Item(|item| cjson_init_item_type(item, cJSON_NULL));
     let (Some(object), Some(name)) = (object, name) else {
-        cJSON_Delete(null.as_ptr());
         return None;
     };
-    let hooks = get_global_hooks();
-    if add_item_to_object(object, name, null, &hooks, false) != 0 {
-        return Some(null);
-    }
-    cJSON_Delete(null.as_ptr());
-    None
+    Some(add_item_to_object_value(
+        object,
+        ObjectKey::Owned(name),
+        null,
+    ))
 }
 #[export_name = "cJSON_AddNullToObject"]
 pub unsafe extern "C" fn cJSON_AddNullToObject_ffi(
@@ -2091,27 +1794,24 @@ pub unsafe extern "C" fn cJSON_AddNullToObject_ffi(
     } else {
         None
     };
-    cJSON_AddNullToObject(object, name)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
-}
-pub fn cJSON_AddTrueToObject(
-    object: Option<&mut cJSON>,
-    name: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let Some(true_item) = cJSON_CreateTrue() else {
-        return None;
-    };
-    let (Some(object), Some(name)) = (object, name) else {
-        cJSON_Delete(true_item.as_ptr());
-        return None;
-    };
-    let hooks = get_global_hooks();
-    if add_item_to_object(object, name, true_item, &hooks, false) != 0 {
-        return Some(true_item);
+    match cJSON_AddNullToObject(object, name) {
+        Some(item) => item as *mut cJSON,
+        None => ::core::ptr::null_mut::<cJSON>(),
     }
-    cJSON_Delete(true_item.as_ptr());
-    None
+}
+pub fn cJSON_AddTrueToObject<'a>(
+    object: Option<&'a mut cJSON>,
+    name: Option<&::std::ffi::CStr>,
+) -> Option<&'a mut cJSON> {
+    let true_item = cJSON_New_Item(|item| cjson_init_item_type(item, cJSON_True));
+    let (Some(object), Some(name)) = (object, name) else {
+        return None;
+    };
+    Some(add_item_to_object_value(
+        object,
+        ObjectKey::Owned(name),
+        true_item,
+    ))
 }
 #[export_name = "cJSON_AddTrueToObject"]
 pub unsafe extern "C" fn cJSON_AddTrueToObject_ffi(
@@ -2124,27 +1824,24 @@ pub unsafe extern "C" fn cJSON_AddTrueToObject_ffi(
     } else {
         None
     };
-    cJSON_AddTrueToObject(object, name)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
-}
-pub fn cJSON_AddFalseToObject(
-    object: Option<&mut cJSON>,
-    name: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let Some(false_item) = cJSON_CreateFalse() else {
-        return None;
-    };
-    let (Some(object), Some(name)) = (object, name) else {
-        cJSON_Delete(false_item.as_ptr());
-        return None;
-    };
-    let hooks = get_global_hooks();
-    if add_item_to_object(object, name, false_item, &hooks, false) != 0 {
-        return Some(false_item);
+    match cJSON_AddTrueToObject(object, name) {
+        Some(item) => item as *mut cJSON,
+        None => ::core::ptr::null_mut::<cJSON>(),
     }
-    cJSON_Delete(false_item.as_ptr());
-    None
+}
+pub fn cJSON_AddFalseToObject<'a>(
+    object: Option<&'a mut cJSON>,
+    name: Option<&::std::ffi::CStr>,
+) -> Option<&'a mut cJSON> {
+    let false_item = cJSON_New_Item(|item| cjson_init_item_type(item, cJSON_False));
+    let (Some(object), Some(name)) = (object, name) else {
+        return None;
+    };
+    Some(add_item_to_object_value(
+        object,
+        ObjectKey::Owned(name),
+        false_item,
+    ))
 }
 #[export_name = "cJSON_AddFalseToObject"]
 pub unsafe extern "C" fn cJSON_AddFalseToObject_ffi(
@@ -2157,28 +1854,34 @@ pub unsafe extern "C" fn cJSON_AddFalseToObject_ffi(
     } else {
         None
     };
-    cJSON_AddFalseToObject(object, name)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
+    match cJSON_AddFalseToObject(object, name) {
+        Some(item) => item as *mut cJSON,
+        None => ::core::ptr::null_mut::<cJSON>(),
+    }
 }
-pub fn cJSON_AddBoolToObject(
-    object: Option<&mut cJSON>,
+pub fn cJSON_AddBoolToObject<'a>(
+    object: Option<&'a mut cJSON>,
     name: Option<&::std::ffi::CStr>,
     boolean: cJSON_bool,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let Some(bool_item) = cJSON_CreateBool(boolean) else {
-        return None;
-    };
+) -> Option<&'a mut cJSON> {
+    let bool_item = cJSON_New_Item(|item| {
+        cjson_init_item_type(
+            item,
+            if boolean != 0 {
+                cJSON_True
+            } else {
+                cJSON_False
+            },
+        );
+    });
     let (Some(object), Some(name)) = (object, name) else {
-        cJSON_Delete(bool_item.as_ptr());
         return None;
     };
-    let hooks = get_global_hooks();
-    if add_item_to_object(object, name, bool_item, &hooks, false) != 0 {
-        return Some(bool_item);
-    }
-    cJSON_Delete(bool_item.as_ptr());
-    None
+    Some(add_item_to_object_value(
+        object,
+        ObjectKey::Owned(name),
+        bool_item,
+    ))
 }
 #[export_name = "cJSON_AddBoolToObject"]
 pub unsafe extern "C" fn cJSON_AddBoolToObject_ffi(
@@ -2192,28 +1895,25 @@ pub unsafe extern "C" fn cJSON_AddBoolToObject_ffi(
     } else {
         None
     };
-    cJSON_AddBoolToObject(object, name, boolean)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
+    match cJSON_AddBoolToObject(object, name, boolean) {
+        Some(item) => item as *mut cJSON,
+        None => ::core::ptr::null_mut::<cJSON>(),
+    }
 }
-pub fn cJSON_AddNumberToObject(
-    object: Option<&mut cJSON>,
+pub fn cJSON_AddNumberToObject<'a>(
+    object: Option<&'a mut cJSON>,
     name: Option<&::std::ffi::CStr>,
     number: ::core::ffi::c_double,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let Some(number_item) = cJSON_CreateNumber(number) else {
-        return None;
-    };
+) -> Option<&'a mut cJSON> {
+    let number_item = cJSON_New_Item(|item| cjson_init_number_item(item, number));
     let (Some(object), Some(name)) = (object, name) else {
-        cJSON_Delete(number_item.as_ptr());
         return None;
     };
-    let hooks = get_global_hooks();
-    if add_item_to_object(object, name, number_item, &hooks, false) != 0 {
-        return Some(number_item);
-    }
-    cJSON_Delete(number_item.as_ptr());
-    None
+    Some(add_item_to_object_value(
+        object,
+        ObjectKey::Owned(name),
+        number_item,
+    ))
 }
 #[export_name = "cJSON_AddNumberToObject"]
 pub unsafe extern "C" fn cJSON_AddNumberToObject_ffi(
@@ -2227,28 +1927,31 @@ pub unsafe extern "C" fn cJSON_AddNumberToObject_ffi(
     } else {
         None
     };
-    cJSON_AddNumberToObject(object, name, number)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
+    match cJSON_AddNumberToObject(object, name, number) {
+        Some(item) => item as *mut cJSON,
+        None => ::core::ptr::null_mut::<cJSON>(),
+    }
 }
-pub fn cJSON_AddStringToObject(
-    object: Option<&mut cJSON>,
+pub fn cJSON_AddStringToObject<'a>(
+    object: Option<&'a mut cJSON>,
     name: Option<&::std::ffi::CStr>,
     string: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let Some(string_item) = cJSON_CreateString(string) else {
-        return None;
-    };
+) -> Option<&'a mut cJSON> {
+    let string = string?;
+    let string_item = cJSON_New_Item(|item| {
+        item.type_0 = cJSON_String;
+        item.valuestring = Some(cJSON_ValueString::Owned(::std::rc::Rc::new(
+            string.to_owned(),
+        )));
+    });
     let (Some(object), Some(name)) = (object, name) else {
-        cJSON_Delete(string_item.as_ptr());
         return None;
     };
-    let hooks = get_global_hooks();
-    if add_item_to_object(object, name, string_item, &hooks, false) != 0 {
-        return Some(string_item);
-    }
-    cJSON_Delete(string_item.as_ptr());
-    None
+    Some(add_item_to_object_value(
+        object,
+        ObjectKey::Owned(name),
+        string_item,
+    ))
 }
 #[export_name = "cJSON_AddStringToObject"]
 pub unsafe extern "C" fn cJSON_AddStringToObject_ffi(
@@ -2267,28 +1970,29 @@ pub unsafe extern "C" fn cJSON_AddStringToObject_ffi(
     } else {
         None
     };
-    cJSON_AddStringToObject(object, name, string)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
+    match cJSON_AddStringToObject(object, name, string) {
+        Some(item) => item as *mut cJSON,
+        None => ::core::ptr::null_mut::<cJSON>(),
+    }
 }
-pub fn cJSON_AddRawToObject(
-    object: Option<&mut cJSON>,
+pub fn cJSON_AddRawToObject<'a>(
+    object: Option<&'a mut cJSON>,
     name: Option<&::std::ffi::CStr>,
     raw: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let Some(raw_item) = cJSON_CreateRaw(raw) else {
-        return None;
-    };
+) -> Option<&'a mut cJSON> {
+    let raw = raw?;
+    let raw_item = cJSON_New_Item(|item| {
+        item.type_0 = cJSON_Raw;
+        item.valuestring = Some(cJSON_ValueString::Owned(::std::rc::Rc::new(raw.to_owned())));
+    });
     let (Some(object), Some(name)) = (object, name) else {
-        cJSON_Delete(raw_item.as_ptr());
         return None;
     };
-    let hooks = get_global_hooks();
-    if add_item_to_object(object, name, raw_item, &hooks, false) != 0 {
-        return Some(raw_item);
-    }
-    cJSON_Delete(raw_item.as_ptr());
-    None
+    Some(add_item_to_object_value(
+        object,
+        ObjectKey::Owned(name),
+        raw_item,
+    ))
 }
 #[export_name = "cJSON_AddRawToObject"]
 pub unsafe extern "C" fn cJSON_AddRawToObject_ffi(
@@ -2307,27 +2011,24 @@ pub unsafe extern "C" fn cJSON_AddRawToObject_ffi(
     } else {
         None
     };
-    cJSON_AddRawToObject(object, name, raw)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
-}
-pub fn cJSON_AddObjectToObject(
-    object: Option<&mut cJSON>,
-    name: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let Some(object_item) = cJSON_CreateObject() else {
-        return None;
-    };
-    let (Some(object), Some(name)) = (object, name) else {
-        cJSON_Delete(object_item.as_ptr());
-        return None;
-    };
-    let hooks = get_global_hooks();
-    if add_item_to_object(object, name, object_item, &hooks, false) != 0 {
-        return Some(object_item);
+    match cJSON_AddRawToObject(object, name, raw) {
+        Some(item) => item as *mut cJSON,
+        None => ::core::ptr::null_mut::<cJSON>(),
     }
-    cJSON_Delete(object_item.as_ptr());
-    None
+}
+pub fn cJSON_AddObjectToObject<'a>(
+    object: Option<&'a mut cJSON>,
+    name: Option<&::std::ffi::CStr>,
+) -> Option<&'a mut cJSON> {
+    let object_item = cJSON_New_Item(|item| cjson_init_item_type(item, cJSON_Object));
+    let (Some(object), Some(name)) = (object, name) else {
+        return None;
+    };
+    Some(add_item_to_object_value(
+        object,
+        ObjectKey::Owned(name),
+        object_item,
+    ))
 }
 #[export_name = "cJSON_AddObjectToObject"]
 pub unsafe extern "C" fn cJSON_AddObjectToObject_ffi(
@@ -2340,27 +2041,24 @@ pub unsafe extern "C" fn cJSON_AddObjectToObject_ffi(
     } else {
         None
     };
-    cJSON_AddObjectToObject(object, name)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
-}
-pub fn cJSON_AddArrayToObject(
-    object: Option<&mut cJSON>,
-    name: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let Some(array) = cJSON_CreateArray() else {
-        return None;
-    };
-    let (Some(object), Some(name)) = (object, name) else {
-        cJSON_Delete(array.as_ptr());
-        return None;
-    };
-    let hooks = get_global_hooks();
-    if add_item_to_object(object, name, array, &hooks, false) != 0 {
-        return Some(array);
+    match cJSON_AddObjectToObject(object, name) {
+        Some(item) => item as *mut cJSON,
+        None => ::core::ptr::null_mut::<cJSON>(),
     }
-    cJSON_Delete(array.as_ptr());
-    None
+}
+pub fn cJSON_AddArrayToObject<'a>(
+    object: Option<&'a mut cJSON>,
+    name: Option<&::std::ffi::CStr>,
+) -> Option<&'a mut cJSON> {
+    let array = cJSON_New_Item(|item| cjson_init_item_type(item, cJSON_Array));
+    let (Some(object), Some(name)) = (object, name) else {
+        return None;
+    };
+    Some(add_item_to_object_value(
+        object,
+        ObjectKey::Owned(name),
+        array,
+    ))
 }
 #[export_name = "cJSON_AddArrayToObject"]
 pub unsafe extern "C" fn cJSON_AddArrayToObject_ffi(
@@ -2373,35 +2071,18 @@ pub unsafe extern "C" fn cJSON_AddArrayToObject_ffi(
     } else {
         None
     };
-    cJSON_AddArrayToObject(object, name)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
-}
-pub fn cJSON_DetachItemViaPointer(
-    parent: &mut cJSON,
-    item: Option<::core::ptr::NonNull<cJSON>>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let item = item?;
-    let item_ptr = item.as_ptr();
-    unsafe {
-        if item_ptr != parent.child && (*item_ptr).prev.is_null() {
-            return None;
-        }
-        if item_ptr != parent.child {
-            (*(*item_ptr).prev).next = (*item_ptr).next;
-        }
-        if !(*item_ptr).next.is_null() {
-            (*(*item_ptr).next).prev = (*item_ptr).prev;
-        }
-        if item_ptr == parent.child {
-            parent.child = (*item_ptr).next;
-        } else if (*item_ptr).next.is_null() {
-            (*parent.child).prev = (*item_ptr).prev;
-        }
-        (*item_ptr).prev = ::core::ptr::null_mut::<cJSON>();
-        (*item_ptr).next = ::core::ptr::null_mut::<cJSON>();
+    match cJSON_AddArrayToObject(object, name) {
+        Some(item) => item as *mut cJSON,
+        None => ::core::ptr::null_mut::<cJSON>(),
     }
-    Some(item)
+}
+pub fn cJSON_DetachItemViaPointer(parent: &mut cJSON, item: Option<&cJSON>) -> Option<cJSON> {
+    let item = item?;
+    let index = parent
+        .children
+        .iter()
+        .position(|current| ::core::ptr::eq(current, item))?;
+    Some(parent.children.remove(index))
 }
 #[export_name = "cJSON_DetachItemViaPointer"]
 pub unsafe extern "C" fn cJSON_DetachItemViaPointer_ffi(
@@ -2411,22 +2092,29 @@ pub unsafe extern "C" fn cJSON_DetachItemViaPointer_ffi(
     let Some(parent) = parent.as_mut() else {
         return ::core::ptr::null_mut::<cJSON>();
     };
-    cJSON_DetachItemViaPointer(parent, ::core::ptr::NonNull::new(item))
-        .map(::core::ptr::NonNull::as_ptr)
+    let item = item.as_ref();
+    cJSON_DetachItemViaPointer(parent, item)
+        .map(Box::new)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
+}
+fn detach_child_at(parent: &mut cJSON, index: size_t) -> Option<cJSON> {
+    if index >= parent.children.len() {
+        return None;
+    }
+    Some(parent.children.remove(index))
 }
 pub fn cJSON_DetachItemFromArray(
     array: Option<&mut cJSON>,
     which: ::core::ffi::c_int,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+) -> Option<cJSON> {
     if which < 0 as ::core::ffi::c_int {
         return None;
     }
     let Some(array) = array else {
         return None;
     };
-    let to_detach = cJSON_GetArrayItem(Some(&*array), which);
-    cJSON_DetachItemViaPointer(array, to_detach)
+    detach_child_at(array, which as size_t)
 }
 #[export_name = "cJSON_DetachItemFromArray"]
 pub unsafe extern "C" fn cJSON_DetachItemFromArray_ffi(
@@ -2434,12 +2122,13 @@ pub unsafe extern "C" fn cJSON_DetachItemFromArray_ffi(
     mut which: ::core::ffi::c_int,
 ) -> *mut cJSON {
     cJSON_DetachItemFromArray(array.as_mut(), which)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::new)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
 pub fn cJSON_DeleteItemFromArray(array: Option<&mut cJSON>, which: ::core::ffi::c_int) {
     if let Some(item) = cJSON_DetachItemFromArray(array, which) {
-        cJSON_Delete(item.as_ptr());
+        drop(item);
     }
 }
 #[export_name = "cJSON_DeleteItemFromArray"]
@@ -2452,11 +2141,21 @@ pub unsafe extern "C" fn cJSON_DeleteItemFromArray_ffi(
 pub fn cJSON_DetachItemFromObject(
     object: Option<&mut cJSON>,
     string: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+) -> Option<cJSON> {
     let object = object?;
     let string = string?;
-    let to_detach = cJSON_GetObjectItem(Some(&*object), Some(string));
-    cJSON_DetachItemViaPointer(object, to_detach)
+    let mut index = 0 as size_t;
+    while let Some(current) = get_array_item(Some(&*object), index) {
+        let current_name = current.string.as_ref().map(cJSON_ValueString::as_c_str);
+        if current_name
+            .map(|current_name| case_insensitive_strcmp(string, current_name) == 0)
+            .unwrap_or(false)
+        {
+            return detach_child_at(object, index);
+        }
+        index = index.wrapping_add(1);
+    }
+    None
 }
 #[export_name = "cJSON_DetachItemFromObject"]
 pub unsafe extern "C" fn cJSON_DetachItemFromObject_ffi(
@@ -2469,17 +2168,28 @@ pub unsafe extern "C" fn cJSON_DetachItemFromObject_ffi(
         Some(::std::ffi::CStr::from_ptr(string))
     };
     cJSON_DetachItemFromObject(object.as_mut(), string)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::new)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
 pub fn cJSON_DetachItemFromObjectCaseSensitive(
     object: Option<&mut cJSON>,
     string: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+) -> Option<cJSON> {
     let object = object?;
     let string = string?;
-    let to_detach = cJSON_GetObjectItemCaseSensitive(Some(&*object), Some(string));
-    cJSON_DetachItemViaPointer(object, to_detach)
+    let mut index = 0 as size_t;
+    while let Some(current) = get_array_item(Some(&*object), index) {
+        let current_name = current.string.as_ref().map(cJSON_ValueString::as_c_str);
+        if current_name
+            .map(|current_name| current_name.to_bytes_with_nul() == string.to_bytes_with_nul())
+            .unwrap_or(false)
+        {
+            return detach_child_at(object, index);
+        }
+        index = index.wrapping_add(1);
+    }
+    None
 }
 #[export_name = "cJSON_DetachItemFromObjectCaseSensitive"]
 pub unsafe extern "C" fn cJSON_DetachItemFromObjectCaseSensitive_ffi(
@@ -2492,12 +2202,13 @@ pub unsafe extern "C" fn cJSON_DetachItemFromObjectCaseSensitive_ffi(
         Some(::std::ffi::CStr::from_ptr(string))
     };
     cJSON_DetachItemFromObjectCaseSensitive(object.as_mut(), string)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::new)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
 pub fn cJSON_DeleteItemFromObject(object: Option<&mut cJSON>, string: Option<&::std::ffi::CStr>) {
     if let Some(item) = cJSON_DetachItemFromObject(object, string) {
-        cJSON_Delete(item.as_ptr());
+        drop(item);
     }
 }
 #[export_name = "cJSON_DeleteItemFromObject"]
@@ -2517,7 +2228,7 @@ pub fn cJSON_DeleteItemFromObjectCaseSensitive(
     string: Option<&::std::ffi::CStr>,
 ) {
     if let Some(item) = cJSON_DetachItemFromObjectCaseSensitive(object, string) {
-        cJSON_Delete(item.as_ptr());
+        drop(item);
     }
 }
 #[export_name = "cJSON_DeleteItemFromObjectCaseSensitive"]
@@ -2535,33 +2246,15 @@ pub unsafe extern "C" fn cJSON_DeleteItemFromObjectCaseSensitive_ffi(
 pub fn cJSON_InsertItemInArray(
     array: &mut cJSON,
     which: ::core::ffi::c_int,
-    newitem: &mut cJSON,
+    newitem: cJSON,
 ) -> cJSON_bool {
-    if which < 0 as ::core::ffi::c_int || ::core::ptr::eq(array, newitem) {
+    if which < 0 as ::core::ffi::c_int {
         return false_0;
     }
-    let array_item = ::core::ptr::NonNull::from(&mut *array);
-    let newitem_item = ::core::ptr::NonNull::from(&mut *newitem);
-    let Some(after_inserted) = get_array_item(Some(array), which as size_t) else {
-        return add_item_to_array(array_item, newitem_item);
-    };
-    let after_inserted = after_inserted.as_ptr();
-    let newitem_ptr = newitem_item.as_ptr();
-    if after_inserted != array.child && unsafe { (*after_inserted).prev.is_null() } {
-        return false_0;
+    if which as size_t >= cJSON_GetArraySize(Some(array)) as size_t {
+        return cJSON_AddItemToArray(array, newitem);
     }
-    newitem.next = after_inserted as *mut cJSON;
-    newitem.prev = unsafe { (*after_inserted).prev };
-    unsafe {
-        (*after_inserted).prev = newitem_ptr as *mut cJSON;
-    }
-    if after_inserted == array.child {
-        array.child = newitem_ptr as *mut cJSON;
-    } else {
-        unsafe {
-            (*newitem.prev).next = newitem_ptr as *mut cJSON;
-        }
-    }
+    array.children.insert(which as usize, newitem);
     return true_0;
 }
 #[export_name = "cJSON_InsertItemInArray"]
@@ -2573,83 +2266,74 @@ pub unsafe extern "C" fn cJSON_InsertItemInArray_ffi(
     if array.is_null() || newitem.is_null() || array == newitem {
         return false_0;
     }
-    let array = array
-        .as_mut()
-        .expect("cJSON_InsertItemInArray received a null array pointer");
-    let newitem = newitem
-        .as_mut()
-        .expect("cJSON_InsertItemInArray received a null item pointer");
-    cJSON_InsertItemInArray(array, which, newitem)
+    let array = array.as_mut().expect("checked non-null array pointer");
+    let newitem = *Box::from_raw(newitem);
+    if cJSON_InsertItemInArray(array, which, newitem) != 0 {
+        true_0
+    } else {
+        false_0
+    }
 }
 fn cJSON_ReplaceItemViaPointer(
-    parent: Option<::core::ptr::NonNull<cJSON>>,
-    item: Option<::core::ptr::NonNull<cJSON>>,
-    replacement: Option<::core::ptr::NonNull<cJSON>>,
-) -> cJSON_bool {
+    parent: Option<&mut cJSON>,
+    item: Option<&cJSON>,
+    replacement: cJSON,
+) -> Result<(), cJSON> {
     let Some(parent) = parent else {
-        return false_0;
+        return Err(replacement);
     };
-    let parent = parent.as_ptr();
-    if unsafe { (*parent).child.is_null() } {
-        return false_0;
+    if parent.children.is_empty() {
+        return Err(replacement);
     }
-    let (Some(item), Some(replacement)) = (item, replacement) else {
-        return false_0;
+    let Some(item) = item else {
+        return Err(replacement);
     };
-    let item = item.as_ptr();
-    let replacement = replacement.as_ptr();
-    if replacement == item {
-        return true_0;
+    if let Some(index) = parent
+        .children
+        .iter()
+        .position(|current| ::core::ptr::eq(current, item))
+    {
+        parent.children[index] = replacement;
+        Ok(())
+    } else {
+        Err(replacement)
     }
-    unsafe {
-        (*replacement).next = (*item).next;
-        (*replacement).prev = (*item).prev;
-        if !(*replacement).next.is_null() {
-            (*(*replacement).next).prev = replacement as *mut cJSON;
-        }
-        if (*parent).child == item {
-            if (*(*parent).child).prev == (*parent).child {
-                (*replacement).prev = replacement as *mut cJSON;
-            }
-            (*parent).child = replacement as *mut cJSON;
-        } else {
-            if !(*replacement).prev.is_null() {
-                (*(*replacement).prev).next = replacement as *mut cJSON;
-            }
-            if (*replacement).next.is_null() {
-                (*(*parent).child).prev = replacement as *mut cJSON;
-            }
-        }
-        (*item).next = ::core::ptr::null_mut::<cJSON>();
-        (*item).prev = ::core::ptr::null_mut::<cJSON>();
-    };
-    cJSON_Delete(item);
-    return true_0;
 }
 #[export_name = "cJSON_ReplaceItemViaPointer"]
 pub unsafe extern "C" fn cJSON_ReplaceItemViaPointer_ffi(
-    parent: *mut cJSON,
+    mut parent: *mut cJSON,
     item: *mut cJSON,
     mut replacement: *mut cJSON,
 ) -> cJSON_bool {
-    cJSON_ReplaceItemViaPointer(
-        ::core::ptr::NonNull::new(parent),
-        ::core::ptr::NonNull::new(item),
-        ::core::ptr::NonNull::new(replacement),
-    )
+    let replacement = if replacement.is_null() {
+        return false_0;
+    } else {
+        *Box::from_raw(replacement)
+    };
+    match cJSON_ReplaceItemViaPointer(parent.as_mut(), item.as_ref(), replacement) {
+        Ok(()) => true_0,
+        Err(replacement) => {
+            let _ = Box::into_raw(Box::new(replacement));
+            false_0
+        }
+    }
+}
+fn replace_child_at(parent: &mut cJSON, index: size_t, replacement: cJSON) -> cJSON_bool {
+    if index >= parent.children.len() {
+        return false_0;
+    }
+    parent.children[index] = replacement;
+    true_0
 }
 pub fn cJSON_ReplaceItemInArray(
     array: &mut cJSON,
     which: ::core::ffi::c_int,
-    newitem: &mut cJSON,
+    newitem: cJSON,
 ) -> cJSON_bool {
-    if which < 0 as ::core::ffi::c_int || ::core::ptr::eq(array, newitem) {
+    if which < 0 as ::core::ffi::c_int {
         return false_0;
     }
-    let item = get_array_item(Some(array), which as size_t);
-    let array = ::core::ptr::NonNull::from(&mut *array);
-    let newitem = ::core::ptr::NonNull::from(&mut *newitem);
-    return cJSON_ReplaceItemViaPointer(Some(array), item, Some(newitem));
+    replace_child_at(array, which as size_t, newitem)
 }
 #[export_name = "cJSON_ReplaceItemInArray"]
 pub unsafe extern "C" fn cJSON_ReplaceItemInArray_ffi(
@@ -2660,50 +2344,49 @@ pub unsafe extern "C" fn cJSON_ReplaceItemInArray_ffi(
     if array.is_null() || newitem.is_null() || array == newitem {
         return false_0;
     }
-    let array = array
-        .as_mut()
-        .expect("cJSON_ReplaceItemInArray received a null array pointer");
-    let newitem = newitem
-        .as_mut()
-        .expect("cJSON_ReplaceItemInArray received a null item pointer");
+    let array = array.as_mut().expect("checked non-null array pointer");
+    let newitem = *Box::from_raw(newitem);
     cJSON_ReplaceItemInArray(array, which, newitem)
 }
 fn replace_item_in_object(
     object: Option<&mut cJSON>,
     string: Option<&::std::ffi::CStr>,
-    replacement: Option<&mut cJSON>,
+    replacement: Option<cJSON>,
     mut case_sensitive: cJSON_bool,
 ) -> cJSON_bool {
-    let (Some(string), Some(replacement)) = (string, replacement) else {
+    let (Some(string), Some(mut replacement)) = (string, replacement) else {
         return false_0;
     };
-    let hooks = get_global_hooks();
-    if replacement.type_0 & cJSON_StringIsConst == 0 && !replacement.string.is_null() {
-        cJSON_free(replacement.string as *mut ::core::ffi::c_void);
-    }
-    replacement.string = cJSON_strdup(Some(string), &hooks)
-        .map(::core::ptr::NonNull::as_ptr)
-        .unwrap_or_else(::core::ptr::null_mut::<::core::ffi::c_char>);
-    if replacement.string.is_null() {
-        return false_0;
-    }
+    replacement.string = Some(cJSON_ValueString::Owned(::std::rc::Rc::new(
+        string.to_owned(),
+    )));
     replacement.type_0 &= !cJSON_StringIsConst;
     let Some(object) = object else {
         return false_0;
     };
-    let item = if case_sensitive != 0 {
-        cJSON_GetObjectItemCaseSensitive(Some(object), Some(string))
-    } else {
-        cJSON_GetObjectItem(Some(object), Some(string))
-    };
-    let object = ::core::ptr::NonNull::from(object);
-    let replacement = ::core::ptr::NonNull::from(replacement);
-    return cJSON_ReplaceItemViaPointer(Some(object), item, Some(replacement));
+    let mut index = 0 as size_t;
+    while let Some(current) = get_array_item(Some(&*object), index) {
+        let current_name = current.string.as_ref().map(cJSON_ValueString::as_c_str);
+        let matches = current_name
+            .map(|current_name| {
+                if case_sensitive != 0 {
+                    current_name.to_bytes_with_nul() == string.to_bytes_with_nul()
+                } else {
+                    case_insensitive_strcmp(string, current_name) == 0
+                }
+            })
+            .unwrap_or(false);
+        if matches {
+            return replace_child_at(object, index, replacement);
+        }
+        index = index.wrapping_add(1);
+    }
+    false_0
 }
 fn cJSON_ReplaceItemInObject(
     object: Option<&mut cJSON>,
     string: Option<&::std::ffi::CStr>,
-    newitem: Option<&mut cJSON>,
+    newitem: Option<cJSON>,
 ) -> cJSON_bool {
     return replace_item_in_object(object, string, newitem, false_0);
 }
@@ -2718,12 +2401,17 @@ pub unsafe extern "C" fn cJSON_ReplaceItemInObject_ffi(
     } else {
         Some(::std::ffi::CStr::from_ptr(string))
     };
-    cJSON_ReplaceItemInObject(object.as_mut(), string, newitem.as_mut())
+    let newitem = if newitem.is_null() {
+        None
+    } else {
+        Some(*Box::from_raw(newitem))
+    };
+    cJSON_ReplaceItemInObject(object.as_mut(), string, newitem)
 }
 fn cJSON_ReplaceItemInObjectCaseSensitive(
     object: Option<&mut cJSON>,
     string: Option<&::std::ffi::CStr>,
-    newitem: Option<&mut cJSON>,
+    newitem: Option<cJSON>,
 ) -> cJSON_bool {
     return replace_item_in_object(object, string, newitem, true_0);
 }
@@ -2738,7 +2426,12 @@ pub unsafe extern "C" fn cJSON_ReplaceItemInObjectCaseSensitive_ffi(
     } else {
         Some(::std::ffi::CStr::from_ptr(string))
     };
-    cJSON_ReplaceItemInObjectCaseSensitive(object.as_mut(), string, newitem.as_mut())
+    let newitem = if newitem.is_null() {
+        None
+    } else {
+        Some(*Box::from_raw(newitem))
+    };
+    cJSON_ReplaceItemInObjectCaseSensitive(object.as_mut(), string, newitem)
 }
 fn cjson_init_item_type(item: &mut cJSON, type_0: ::core::ffi::c_int) {
     item.type_0 = type_0;
@@ -2747,39 +2440,44 @@ fn cjson_init_number_item(item: &mut cJSON, number: ::core::ffi::c_double) {
     cjson_init_item_type(item, cJSON_Number);
     cJSON_SetNumberHelper(item, number);
 }
-pub fn cJSON_CreateNull() -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| cjson_init_item_type(item, cJSON_NULL))
+fn cJSON_CreateNull_Box() -> Box<cJSON> {
+    cJSON_New_Item_Box(|item| cjson_init_item_type(item, cJSON_NULL))
+}
+pub fn cJSON_CreateNull() -> Option<Box<cJSON>> {
+    Some(cJSON_CreateNull_Box())
 }
 #[export_name = "cJSON_CreateNull"]
 pub unsafe extern "C" fn cJSON_CreateNull_ffi() -> *mut cJSON {
     cJSON_CreateNull()
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateTrue() -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| cjson_init_item_type(item, cJSON_True))
+fn cJSON_CreateTrue_Box() -> Box<cJSON> {
+    cJSON_New_Item_Box(|item| cjson_init_item_type(item, cJSON_True))
+}
+pub fn cJSON_CreateTrue() -> Option<Box<cJSON>> {
+    Some(cJSON_CreateTrue_Box())
 }
 #[export_name = "cJSON_CreateTrue"]
 pub unsafe extern "C" fn cJSON_CreateTrue_ffi() -> *mut cJSON {
     cJSON_CreateTrue()
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateFalse() -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| cjson_init_item_type(item, cJSON_False))
+fn cJSON_CreateFalse_Box() -> Box<cJSON> {
+    cJSON_New_Item_Box(|item| cjson_init_item_type(item, cJSON_False))
+}
+pub fn cJSON_CreateFalse() -> Option<Box<cJSON>> {
+    Some(cJSON_CreateFalse_Box())
 }
 #[export_name = "cJSON_CreateFalse"]
 pub unsafe extern "C" fn cJSON_CreateFalse_ffi() -> *mut cJSON {
     cJSON_CreateFalse()
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateBool(boolean: cJSON_bool) -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| {
+fn cJSON_CreateBool_Box(boolean: cJSON_bool) -> Box<cJSON> {
+    cJSON_New_Item_Box(|item| {
         cjson_init_item_type(
             item,
             if boolean != 0 {
@@ -2790,42 +2488,38 @@ pub fn cJSON_CreateBool(boolean: cJSON_bool) -> Option<::core::ptr::NonNull<cJSO
         );
     })
 }
+pub fn cJSON_CreateBool(boolean: cJSON_bool) -> Option<Box<cJSON>> {
+    Some(cJSON_CreateBool_Box(boolean))
+}
 #[export_name = "cJSON_CreateBool"]
 pub unsafe extern "C" fn cJSON_CreateBool_ffi(mut boolean: cJSON_bool) -> *mut cJSON {
     cJSON_CreateBool(boolean)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateNumber(num: ::core::ffi::c_double) -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| cjson_init_number_item(item, num))
+fn cJSON_CreateNumber_Box(num: ::core::ffi::c_double) -> Box<cJSON> {
+    cJSON_New_Item_Box(|item| cjson_init_number_item(item, num))
+}
+pub fn cJSON_CreateNumber(num: ::core::ffi::c_double) -> Option<Box<cJSON>> {
+    Some(cJSON_CreateNumber_Box(num))
 }
 #[export_name = "cJSON_CreateNumber"]
 pub unsafe extern "C" fn cJSON_CreateNumber_ffi(mut num: ::core::ffi::c_double) -> *mut cJSON {
     cJSON_CreateNumber(num)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateString(
-    string: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    let mut valuestring = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let item = cJSON_New_Item(&hooks, |item| {
+fn cJSON_CreateString_Box(string: Option<&::std::ffi::CStr>) -> Option<Box<cJSON>> {
+    let string = string?;
+    Some(cJSON_New_Item_Box(|item| {
         item.type_0 = cJSON_String;
-        valuestring = cJSON_strdup(string, &hooks)
-            .map(::core::ptr::NonNull::as_ptr)
-            .unwrap_or_else(::core::ptr::null_mut::<::core::ffi::c_char>);
-        item.valuestring = valuestring;
-    });
-    if let Some(item) = item {
-        if valuestring.is_null() {
-            cJSON_Delete(item.as_ptr());
-            return None;
-        }
-        return Some(item);
-    }
-    None
+        item.valuestring = Some(cJSON_ValueString::Owned(::std::rc::Rc::new(
+            string.to_owned(),
+        )));
+    }))
+}
+pub fn cJSON_CreateString(string: Option<&::std::ffi::CStr>) -> Option<Box<cJSON>> {
+    cJSON_CreateString_Box(string)
 }
 #[export_name = "cJSON_CreateString"]
 pub unsafe extern "C" fn cJSON_CreateString_ffi(
@@ -2837,86 +2531,65 @@ pub unsafe extern "C" fn cJSON_CreateString_ffi(
         Some(::std::ffi::CStr::from_ptr(string))
     };
     cJSON_CreateString(string)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
 pub fn cJSON_CreateStringReference(
-    string: Option<&::std::ffi::CStr>,
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| {
+    string: Option<&'static ::std::ffi::CStr>,
+) -> Option<Box<cJSON>> {
+    Some(cJSON_New_Item_Box(|item| {
         item.type_0 = cJSON_String | cJSON_IsReference;
-        item.valuestring = string
-            .map(::std::ffi::CStr::as_ptr)
-            .unwrap_or_else(::core::ptr::null::<::core::ffi::c_char>)
-            .cast_mut();
-    })
+        item.valuestring = string.map(cJSON_ValueString::Reference);
+    }))
 }
 #[export_name = "cJSON_CreateStringReference"]
 pub unsafe extern "C" fn cJSON_CreateStringReference_ffi(
     mut string: *const ::core::ffi::c_char,
 ) -> *mut cJSON {
-    let string = if string.is_null() {
+    let string: Option<&'static ::std::ffi::CStr> = if string.is_null() {
         None
     } else {
         Some(::std::ffi::CStr::from_ptr(string))
     };
     cJSON_CreateStringReference(string)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateObjectReference(child: Option<&cJSON>) -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| {
+pub fn cJSON_CreateObjectReference(child: Option<&'static cJSON>) -> Option<Box<cJSON>> {
+    Some(cJSON_New_Item_Box(|item| {
         item.type_0 = cJSON_Object | cJSON_IsReference;
-        item.child = match child {
-            Some(child) => (child as *const cJSON).cast_mut(),
-            None => ::core::ptr::null_mut::<cJSON>(),
-        };
-    })
+        item.reference_child = child;
+    }))
 }
 #[export_name = "cJSON_CreateObjectReference"]
 pub unsafe extern "C" fn cJSON_CreateObjectReference_ffi(mut child: *const cJSON) -> *mut cJSON {
     let child = child.as_ref();
     cJSON_CreateObjectReference(child)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateArrayReference(child: Option<&cJSON>) -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| {
+pub fn cJSON_CreateArrayReference(child: Option<&'static cJSON>) -> Option<Box<cJSON>> {
+    Some(cJSON_New_Item_Box(|item| {
         item.type_0 = cJSON_Array | cJSON_IsReference;
-        item.child = match child {
-            Some(child) => (child as *const cJSON).cast_mut(),
-            None => ::core::ptr::null_mut::<cJSON>(),
-        };
-    })
+        item.reference_child = child;
+    }))
 }
 #[export_name = "cJSON_CreateArrayReference"]
 pub unsafe extern "C" fn cJSON_CreateArrayReference_ffi(mut child: *const cJSON) -> *mut cJSON {
     let child = child.as_ref();
     cJSON_CreateArrayReference(child)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateRaw(raw: Option<&::std::ffi::CStr>) -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    let mut valuestring = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let item = cJSON_New_Item(&hooks, |item| {
+fn cJSON_CreateRaw_Box(raw: Option<&::std::ffi::CStr>) -> Option<Box<cJSON>> {
+    let raw = raw?;
+    Some(cJSON_New_Item_Box(|item| {
         item.type_0 = cJSON_Raw;
-        valuestring = cJSON_strdup(raw, &hooks)
-            .map(::core::ptr::NonNull::as_ptr)
-            .unwrap_or_else(::core::ptr::null_mut::<::core::ffi::c_char>);
-        item.valuestring = valuestring;
-    });
-    if let Some(item) = item {
-        if valuestring.is_null() {
-            cJSON_Delete(item.as_ptr());
-            return None;
-        }
-        return Some(item);
-    }
-    None
+        item.valuestring = Some(cJSON_ValueString::Owned(::std::rc::Rc::new(raw.to_owned())));
+    }))
+}
+pub fn cJSON_CreateRaw(raw: Option<&::std::ffi::CStr>) -> Option<Box<cJSON>> {
+    cJSON_CreateRaw_Box(raw)
 }
 #[export_name = "cJSON_CreateRaw"]
 pub unsafe extern "C" fn cJSON_CreateRaw_ffi(mut raw: *const ::core::ffi::c_char) -> *mut cJSON {
@@ -2926,37 +2599,42 @@ pub unsafe extern "C" fn cJSON_CreateRaw_ffi(mut raw: *const ::core::ffi::c_char
         Some(::std::ffi::CStr::from_ptr(raw))
     };
     cJSON_CreateRaw(raw)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateArray() -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| cjson_init_item_type(item, cJSON_Array))
+pub fn cJSON_CreateArray() -> Option<Box<cJSON>> {
+    Some(cJSON_New_Item_Box(|item| {
+        cjson_init_item_type(item, cJSON_Array)
+    }))
 }
 #[export_name = "cJSON_CreateArray"]
 pub unsafe extern "C" fn cJSON_CreateArray_ffi() -> *mut cJSON {
     cJSON_CreateArray()
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateObject() -> Option<::core::ptr::NonNull<cJSON>> {
-    let hooks = get_global_hooks();
-    cJSON_New_Item(&hooks, |item| cjson_init_item_type(item, cJSON_Object))
+pub fn cJSON_CreateObject() -> Option<Box<cJSON>> {
+    Some(cJSON_New_Item_Box(|item| {
+        cjson_init_item_type(item, cJSON_Object)
+    }))
 }
 #[export_name = "cJSON_CreateObject"]
 pub unsafe extern "C" fn cJSON_CreateObject_ffi() -> *mut cJSON {
     cJSON_CreateObject()
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateIntArray(numbers: &[::core::ffi::c_int]) -> Option<::core::ptr::NonNull<cJSON>> {
-    let a = cJSON_CreateArray()?;
+fn transfer_item_to_array(array: &mut cJSON, item: cJSON) -> cJSON_bool {
+    cJSON_AddItemToArray(array, item)
+}
+pub fn cJSON_CreateIntArray(numbers: &[::core::ffi::c_int]) -> Option<Box<cJSON>> {
+    let mut a = cJSON_CreateArray()?;
     for number in numbers {
-        let Some(n) = cJSON_CreateNumber(*number as ::core::ffi::c_double) else {
-            cJSON_Delete(a.as_ptr());
+        let n =
+            cJSON_New_Item(|item| cjson_init_number_item(item, *number as ::core::ffi::c_double));
+        if transfer_item_to_array(a.as_mut(), n) == 0 {
             return None;
-        };
-        add_item_to_array(a, n);
+        }
     }
     Some(a)
 }
@@ -2974,19 +2652,17 @@ pub unsafe extern "C" fn cJSON_CreateIntArray_ffi(
         ::core::slice::from_raw_parts(numbers, count as usize)
     };
     cJSON_CreateIntArray(numbers)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateFloatArray(
-    numbers: &[::core::ffi::c_float],
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let a = cJSON_CreateArray()?;
+pub fn cJSON_CreateFloatArray(numbers: &[::core::ffi::c_float]) -> Option<Box<cJSON>> {
+    let mut a = cJSON_CreateArray()?;
     for number in numbers {
-        let Some(n) = cJSON_CreateNumber(*number as ::core::ffi::c_double) else {
-            cJSON_Delete(a.as_ptr());
+        let n =
+            cJSON_New_Item(|item| cjson_init_number_item(item, *number as ::core::ffi::c_double));
+        if transfer_item_to_array(a.as_mut(), n) == 0 {
             return None;
-        };
-        add_item_to_array(a, n);
+        }
     }
     Some(a)
 }
@@ -3004,19 +2680,16 @@ pub unsafe extern "C" fn cJSON_CreateFloatArray_ffi(
         ::core::slice::from_raw_parts(numbers, count as usize)
     };
     cJSON_CreateFloatArray(numbers)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateDoubleArray(
-    numbers: &[::core::ffi::c_double],
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let a = cJSON_CreateArray()?;
+pub fn cJSON_CreateDoubleArray(numbers: &[::core::ffi::c_double]) -> Option<Box<cJSON>> {
+    let mut a = cJSON_CreateArray()?;
     for number in numbers {
-        let Some(n) = cJSON_CreateNumber(*number) else {
-            cJSON_Delete(a.as_ptr());
+        let n = cJSON_New_Item(|item| cjson_init_number_item(item, *number));
+        if transfer_item_to_array(a.as_mut(), n) == 0 {
             return None;
-        };
-        add_item_to_array(a, n);
+        }
     }
     Some(a)
 }
@@ -3034,19 +2707,22 @@ pub unsafe extern "C" fn cJSON_CreateDoubleArray_ffi(
         ::core::slice::from_raw_parts(numbers, count as usize)
     };
     cJSON_CreateDoubleArray(numbers)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_CreateStringArray(
-    strings: &[Option<&::std::ffi::CStr>],
-) -> Option<::core::ptr::NonNull<cJSON>> {
-    let a = cJSON_CreateArray()?;
+pub fn cJSON_CreateStringArray(strings: &[Option<&::std::ffi::CStr>]) -> Option<Box<cJSON>> {
+    let mut a = cJSON_CreateArray()?;
     for string in strings.iter().copied() {
-        let Some(n) = cJSON_CreateString(string) else {
-            cJSON_Delete(a.as_ptr());
+        let string = string?;
+        let n = cJSON_New_Item(|item| {
+            item.type_0 = cJSON_String;
+            item.valuestring = Some(cJSON_ValueString::Owned(::std::rc::Rc::new(
+                string.to_owned(),
+            )));
+        });
+        if transfer_item_to_array(a.as_mut(), n) == 0 {
             return None;
-        };
-        add_item_to_array(a, n);
+        }
     }
     Some(a)
 }
@@ -3072,13 +2748,10 @@ pub unsafe extern "C" fn cJSON_CreateStringArray_ffi(
         }
     }
     cJSON_CreateStringArray(&string_refs)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
-pub fn cJSON_Duplicate(
-    item: Option<&cJSON>,
-    recurse: cJSON_bool,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+pub fn cJSON_Duplicate(item: Option<&cJSON>, recurse: cJSON_bool) -> Option<Box<cJSON>> {
     cJSON_Duplicate_rec(item, 0 as size_t, recurse)
 }
 #[export_name = "cJSON_Duplicate"]
@@ -3087,75 +2760,70 @@ pub unsafe extern "C" fn cJSON_Duplicate_ffi(
     mut recurse: cJSON_bool,
 ) -> *mut cJSON {
     cJSON_Duplicate(item.as_ref(), recurse)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
 pub fn cJSON_Duplicate_rec(
     item: Option<&cJSON>,
     depth: size_t,
     recurse: cJSON_bool,
-) -> Option<::core::ptr::NonNull<cJSON>> {
+) -> Option<Box<cJSON>> {
+    cJSON_Duplicate_rec_value(item, depth, recurse).map(Box::new)
+}
+fn cJSON_Duplicate_rec_value(
+    item: Option<&cJSON>,
+    depth: size_t,
+    recurse: cJSON_bool,
+) -> Option<cJSON> {
     let item = item?;
-    let hooks = get_global_hooks();
-    let mut failed = false;
-    let valuestring = if item.valuestring.is_null() {
-        None
-    } else {
-        Some(unsafe { ::std::ffi::CStr::from_ptr(item.valuestring) })
+    let valuestring = match item.valuestring.as_ref() {
+        Some(cJSON_ValueString::Owned(valuestring)) => Some(cJSON_ValueString::Owned(
+            ::std::rc::Rc::new((**valuestring).clone()),
+        )),
+        Some(cJSON_ValueString::Reference(valuestring)) => Some(cJSON_ValueString::Owned(
+            ::std::rc::Rc::new((*valuestring).to_owned()),
+        )),
+        None => None,
     };
-    let string = if item.string.is_null() {
-        None
-    } else {
-        Some(unsafe { ::std::ffi::CStr::from_ptr(item.string) })
+    let string = match item.string.as_ref() {
+        Some(cJSON_ValueString::Owned(string)) if item.type_0 & cJSON_StringIsConst != 0 => {
+            Some(cJSON_ValueString::Owned(::std::rc::Rc::clone(string)))
+        }
+        Some(cJSON_ValueString::Owned(string)) => Some(cJSON_ValueString::Owned(
+            ::std::rc::Rc::new((**string).clone()),
+        )),
+        Some(cJSON_ValueString::Reference(string)) if item.type_0 & cJSON_StringIsConst != 0 => {
+            Some(cJSON_ValueString::Reference(*string))
+        }
+        Some(cJSON_ValueString::Reference(string)) => Some(cJSON_ValueString::Owned(
+            ::std::rc::Rc::new((*string).to_owned()),
+        )),
+        None => None,
     };
-    let Some(newitem) = cJSON_New_Item(&hooks, |newitem| {
+    let mut newitem = cJSON_New_Item(|newitem| {
         newitem.type_0 = item.type_0 & !cJSON_IsReference;
         newitem.valueint = item.valueint;
         newitem.valuedouble = item.valuedouble;
-        if let Some(valuestring) = valuestring {
-            newitem.valuestring = cJSON_strdup(Some(valuestring), &hooks)
-                .map(::core::ptr::NonNull::as_ptr)
-                .unwrap_or_else(::core::ptr::null_mut::<::core::ffi::c_char>);
-            failed = newitem.valuestring.is_null();
-        }
-        if !failed {
-            newitem.string = if item.type_0 & cJSON_StringIsConst != 0 {
-                item.string
-            } else if let Some(string) = string {
-                cJSON_strdup(Some(string), &hooks)
-                    .map(::core::ptr::NonNull::as_ptr)
-                    .unwrap_or_else(::core::ptr::null_mut::<::core::ffi::c_char>)
-            } else {
-                ::core::ptr::null_mut::<::core::ffi::c_char>()
-            };
-            failed = string.is_some() && newitem.string.is_null();
-        }
-    }) else {
-        return None;
-    };
-    if failed {
-        cJSON_Delete(newitem.as_ptr());
-        return None;
-    }
+        newitem.valuestring = valuestring;
+        newitem.string = string;
+    });
     if recurse == 0 {
         return Some(newitem);
     }
-    let mut child = item.child;
-    while !child.is_null() {
+    let mut child_index = 0 as size_t;
+    while let Some(child) = get_array_item(Some(item), child_index) {
         if depth >= CJSON_CIRCULAR_LIMIT as size_t {
-            cJSON_Delete(newitem.as_ptr());
             return None;
         }
-        let Some(newchild) = cJSON_Duplicate_rec(
-            unsafe { child.as_ref() },
-            depth.wrapping_add(1 as size_t),
-            true_0,
-        ) else {
-            cJSON_Delete(newitem.as_ptr());
+        let Some(newchild) =
+            cJSON_Duplicate_rec_value(Some(child), depth.wrapping_add(1 as size_t), true_0)
+        else {
             return None;
         };
-        add_item_to_array(newitem, newchild);
-        child = unsafe { (*child).next as *mut cJSON };
+        if transfer_item_to_array(&mut newitem, newchild) == 0 {
+            return None;
+        }
+        child_index = child_index.wrapping_add(1 as size_t);
     }
     Some(newitem)
 }
@@ -3166,7 +2834,7 @@ pub unsafe extern "C" fn cJSON_Duplicate_rec_ffi(
     mut recurse: cJSON_bool,
 ) -> *mut cJSON {
     cJSON_Duplicate_rec(item.as_ref(), depth, recurse)
-        .map(::core::ptr::NonNull::as_ptr)
+        .map(Box::into_raw)
         .unwrap_or_else(::core::ptr::null_mut::<cJSON>)
 }
 fn skip_oneline_comment(json: &[u8], input: &mut usize) {
@@ -3351,65 +3019,63 @@ pub fn cJSON_Compare(
             return false_0;
         }
         cJSON_String | cJSON_Raw => {
-            if a_item.valuestring.is_null() || b_item.valuestring.is_null() {
+            let (Some(a_valuestring), Some(b_valuestring)) =
+                (a_item.valuestring.as_ref(), b_item.valuestring.as_ref())
+            else {
                 return false_0;
-            }
-            if unsafe { strcmp(a_item.valuestring, b_item.valuestring) } == 0 as ::core::ffi::c_int
+            };
+            if a_valuestring.as_c_str().to_bytes_with_nul()
+                == b_valuestring.as_c_str().to_bytes_with_nul()
             {
                 return true_0;
             }
             return false_0;
         }
-        cJSON_Array => unsafe {
-            let mut a_element: *mut cJSON = a_item.child as *mut cJSON;
-            let mut b_element: *mut cJSON = b_item.child as *mut cJSON;
-            while !a_element.is_null() && !b_element.is_null() {
-                let a_child = &*a_element;
-                let b_child = &*b_element;
+        cJSON_Array => {
+            let mut index = 0 as size_t;
+            loop {
+                let a_child = get_array_item(Some(a_item), index);
+                let b_child = get_array_item(Some(b_item), index);
+                let (Some(a_child), Some(b_child)) = (a_child, b_child) else {
+                    return (a_child.is_none() && b_child.is_none()) as cJSON_bool;
+                };
                 if cJSON_Compare(Some(a_child), Some(b_child), case_sensitive) == 0 {
                     return false_0;
                 }
-                a_element = a_child.next;
-                b_element = b_child.next;
+                index = index.wrapping_add(1 as size_t);
             }
-            if a_element != b_element {
-                return false_0;
-            }
-            return true_0;
-        },
-        cJSON_Object => unsafe {
-            let mut a_element_0: *mut cJSON = a_item.child as *mut cJSON;
-            while !a_element_0.is_null() {
-                let a_child = &*a_element_0;
-                let Some(b_element_0) = get_object_item(
+        }
+        cJSON_Object => {
+            let mut index = 0 as size_t;
+            while let Some(a_child) = get_array_item(Some(a_item), index) {
+                let Some(b_child) = get_object_item(
                     b_item,
                     Some(ObjectItemName::ItemString(a_child)),
                     case_sensitive,
                 ) else {
                     return false_0;
                 };
-                if cJSON_Compare(Some(a_child), Some(&*b_element_0.as_ptr()), case_sensitive) == 0 {
+                if cJSON_Compare(Some(a_child), Some(b_child), case_sensitive) == 0 {
                     return false_0;
                 }
-                a_element_0 = a_child.next;
+                index = index.wrapping_add(1 as size_t);
             }
-            let mut b_element_0 = b_item.child as *mut cJSON;
-            while !b_element_0.is_null() {
-                let b_child = &*b_element_0;
-                let Some(a_element_0) = get_object_item(
+            let mut index = 0 as size_t;
+            while let Some(b_child) = get_array_item(Some(b_item), index) {
+                let Some(a_child) = get_object_item(
                     a_item,
                     Some(ObjectItemName::ItemString(b_child)),
                     case_sensitive,
                 ) else {
                     return false_0;
                 };
-                if cJSON_Compare(Some(b_child), Some(&*a_element_0.as_ptr()), case_sensitive) == 0 {
+                if cJSON_Compare(Some(b_child), Some(a_child), case_sensitive) == 0 {
                     return false_0;
                 }
-                b_element_0 = b_child.next;
+                index = index.wrapping_add(1 as size_t);
             }
             return true_0;
-        },
+        }
         _ => return false_0,
     };
 }
@@ -3427,16 +3093,11 @@ pub unsafe extern "C" fn cJSON_malloc_ffi(mut size: size_t) -> *mut ::core::ffi:
         .allocate
         .expect("non-null function pointer")(size)
 }
-pub fn cJSON_free(object: *mut ::core::ffi::c_void) {
-    unsafe {
-        get_global_hooks()
-            .deallocate
-            .expect("non-null function pointer")(object);
-    }
-}
 #[export_name = "cJSON_free"]
 pub unsafe extern "C" fn cJSON_free_ffi(mut object: *mut ::core::ffi::c_void) {
-    cJSON_free(object)
+    get_global_hooks()
+        .deallocate
+        .expect("non-null function pointer")(object);
 }
 pub const __INT_MAX__: ::core::ffi::c_int = 2147483647 as ::core::ffi::c_int;
 pub const __DBL_EPSILON__: ::core::ffi::c_double = 2.2204460492503131e-16f64;
