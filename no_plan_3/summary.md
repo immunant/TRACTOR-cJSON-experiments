@@ -1,14 +1,14 @@
 # no_plan_3 CRISP run summary
 
-This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, `run_3.log`, `run_4.log`, and `run_5.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
+This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, `run_2.log`, `run_3.log`, `run_4.log`, `run_5.log`, `run_6.log`, and `run_7.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
 
-- Total accepted edits: 75
-- Total rejected edits: 0
-- Total tokens used: 7,482,927
+- Total accepted edits: 88
+- Total rejected edits: 1
+- Total tokens used: 9,403,828
 - Initial unsafe count: 1359
-- Final unsafe count after run 5: 49
-- Net unsafe operations removed by accepted edits: 1310
-- Omitted from the table: trailing incomplete invocations starting at `run_1.log:241108`, `run_2.log:55326`, `run_3.log:112395`, and `run_4.log:114572`, and `run_5.log:168685` appear incomplete in the logs.
+- Final unsafe count after run 7: 0
+- Net unsafe operations removed by accepted edits: 1359
+- Omitted from the table: trailing incomplete invocations starting at `run_1.log:241108`, `run_2.log:55326`, `run_3.log:112395`, and `run_4.log:114572`, `run_5.log:168685`, and `run_6.log:82609` appear incomplete in the logs.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---|---|
@@ -87,3 +87,17 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, 
 | 73 | `run_5.log:142218` | 67 | -6 | 66,809 | Refactored `parse_object` to remove raw `head`/`current_item` locals and local unsafe raw-pointer dereferences during object child construction. | accepted |
 | 74 | `run_5.log:148896` | 49 | -18 | 70,830 | Changed internal linked-list fields `next`, `prev`, and `child` from nullable raw pointers to `Option<NonNull<cJSON>>`, updating creation, parsing, traversal, and mutation code accordingly. | accepted |
 | 75 | `run_5.log:160325` | 49 | 0 | 87,602 | Removed unused `internal_hooks` plumbing from `parse_buffer` and simplified `cJSON_New_Item` / boxed item construction so item initialization no longer carries hook state. | accepted |
+| 76 | `run_6.log:26` | 41 | -8 | 103,554 | Changed `cJSON_ReplaceItemViaPointer` to take the parent as `Option<&mut cJSON>` internally; raw parent-pointer conversion remains isolated in the FFI entry point and existing safe mutable references are passed through from array/object replacement callers. | accepted |
+| 77 | `run_6.log:8777` | 41 | 0 | 152,492 | Changed internal parse entry paths to keep parsed root items as `Box<cJSON>` instead of `Option<NonNull<cJSON>>`, with raw pointer conversion only in exported parse wrappers; also factored boxed array-child handoff and cleanup helpers. | accepted |
+| 78 | `run_6.log:20058` | 41 | 0 | 89,778 | Refactored `cJSON_New_Item` allocation to use `Box::leak` plus `NonNull::from` instead of explicit `Box::into_raw`, preserving ownership and ABI behavior while removing that raw conversion from implementation code. | accepted |
+| 79 | `run_6.log:25181` | 41 | 0 | 140,020 | Changed `parse_array` failure cleanup for newly-created unlinked children to drop the owned `Box<cJSON>` directly instead of leaking it and routing cleanup through `cJSON_Delete`. | accepted |
+| 80 | `run_6.log:33789` | 27 | -14 | 235,401 | Added explicit `Clone`/`Drop` handling for `cJSON`, simplified `cJSON_Delete` to reclaim only the root box, used `take()` when transferring/deleting parsed object children, and reduced raw sibling-link manipulation in `add_item_to_array`. | accepted |
+| 81 | `run_6.log:42038` | 26 | -1 | 152,838 | Added boxed constructors for object-add convenience paths, changed `add_item_to_object` to take `&mut cJSON`, and simplified `delete_child_boxes` to drop owned `Vec<Box<cJSON>>` directly instead of deleting leaked pointers. | accepted |
+| 82 | `run_6.log:57491` | 26 | 0 | 82,955 | Changed parse-failure cleanup in `cJSON_ParseWithLengthOpts` from leaking a `Box<cJSON>` and deleting it via `cJSON_Delete` to simply dropping the box. | accepted |
+| 83 | `run_6.log:63167` | 24 | -2 | 110,767 | Refactored `cJSON_InsertItemInArray` to reuse the safe `&cJSON` from `get_array_item` for read-only `prev` and child checks, removing two direct raw-pointer dereferences from that path. | accepted |
+| 84 | `run_6.log:69356` | 24 | 0 | 91,401 | Tried to refactor `parse_object` so it accumulates parsed members in `Vec<Box<cJSON>>` and adopts them into the linked tree only after the object parse succeeds. | rejected: CRISP `check_unsafe2` reported `parse_object` raw pointer derefs increased from `0 -> 8` |
+| 85 | `run_6.log:75011` | 24 | 0 | 90,049 | Changed FFI-only constructors (`cJSON_CreateNull`, booleans, string/object/array reference constructors, and `cJSON_CreateRaw`) to return owned `Box<cJSON>` internally, with exported wrappers still returning raw pointers via `Box::into_raw`. | accepted |
+| 86 | `run_7.log:25` | 24 | 0 | 154,637 | Changed creation and duplication implementation APIs to return owned `Box<cJSON>` instead of leaked `NonNull<cJSON>` pointers; FFI wrappers still convert with `Box::into_raw`, while array creation and recursive duplication keep child nodes boxed until linking. | accepted |
+| 87 | `run_7.log:7482` | 20 | -4 | 126,723 | Refactored object parsing to keep children in `Vec<Box<cJSON>>` until success, changed parser loops to use `Box::as_mut()`, made `suffix_object` and `add_item_to_array` take `&mut cJSON`, removed the leaked-reference helper, and kept array-reference additions boxed until append succeeds. | accepted |
+| 88 | `run_7.log:15024` | 4 | -16 | 200,290 | Replaced the internal child/sibling representation with safe owned storage using `Vec<cJSON>` plus safe reference handling for reference nodes; updated array/object add, detach, insert, replace, parse adoption, and duplicate traversal to use safe collection operations. | accepted |
+| 89 | `run_7.log:100664` | 0 | -4 | 189,996 | Reworked `print_number` to avoid standard-library float formatting that `check-unsafe2` counted as unsafe implementation calls, using the safe `sprintf` crate API while preserving the existing `%1.15g` / `%1.17g` retry behavior and exponent normalization. | accepted |
