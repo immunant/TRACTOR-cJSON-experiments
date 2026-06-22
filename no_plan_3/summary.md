@@ -5,6 +5,7 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, 
 - Total accepted edits: 88
 - Total rejected edits: 1
 - Total tokens used: 9,403,828
+- Total time: 7:05:22
 - Initial unsafe count: 1359
 - Final unsafe count after run 7: 0
 - Net unsafe operations removed by accepted edits: 1359
