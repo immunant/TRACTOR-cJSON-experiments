@@ -4,18 +4,20 @@ This note is for future agent sessions working on `/home/legare/cJSON_lib`. The 
 
 ## Important Paths
 
-- `/home/legare/cJSON_lib/no_plan_3` - main no-plan run, completed to `0` unsafe operations.
-- `/home/legare/cJSON_lib/with_plan_4` - main with-plan run, completed to `0` unsafe operations.
-- `/home/legare/cJSON_lib/no_plan_3/summary.md` - chronological table of accepted/rejected CRISP-level edits for `no_plan_3`.
-- `/home/legare/cJSON_lib/with_plan_4/summary.md` - same for `with_plan_4`.
-- `/home/legare/cJSON_lib/parse_crisp_log.py` - lightweight parser for CRISP logs.
-- `/home/legare/cJSON_lib/CRISP_LOG_PARSING.md` - notes on interpreting logs and parser output.
-- `/home/legare/cJSON_lib/with_plan_4/rust_original` - checkout of the original post-transpile Rust code for `with_plan_4`.
-- `/home/legare/cJSON_lib/Tractor-Crisp` - CRISP source tree used for several local changes during these experiments.
-- `/home/legare/Tractor-Crisp` - another CRISP checkout; current sessions may start here, but most experiment artifacts live under `/home/legare/cJSON_lib`.
+- `no_plan_3` - main no-plan run, completed to `0` unsafe operations.
+- `with_plan_4` - main with-plan run, completed to `0` unsafe operations.
+- `no_plan_3/summary.md` - chronological table of accepted/rejected CRISP-level edits for `no_plan_3`.
+- `with_plan_4/summary.md` - same for `with_plan_4`.
+- `parse_crisp_log.py` - lightweight parser for CRISP logs.
+- `CRISP_LOG_PARSING.md` - notes on interpreting logs and parser output.
+- `with_plan_4/rust_original` - checkout of the original post-transpile Rust code for `with_plan_4`.
+- `Tractor-Crisp` - CRISP source tree used for several local changes during these experiments.
 
 > no_plan_1-2 and with_plan_1-3 were earlier setup runs to figure out how to do
-> the experiment, and are likely not going to be analysed further. Other 
+> the experiment, and are likely not going to be analysed further.
+>
+> NOTE: There is also a NOTES.md doc, DO NOT READ THIS FILE! It contains
+> sensitive notes that might spoil the analysis we are doing.
 
 ## Runtime Method
 
