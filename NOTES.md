@@ -41,6 +41,7 @@
 - Allows setting custom malloc/free hooks, which makes using std collections
   like `Box` and `Vec`... impossible? And means we can't do any kind of safe
   allocation, really, since we have to go through an FFI on every allocation.
+  - Well, there is unstable support for custom allocators in std collections.
 - What is the contract for the public API? Is it valid for the client to ever
   construct a cJSON struct themself, or are they required to always go through
   one of the exposed functions that allocates one?
@@ -69,3 +70,69 @@
   - `SetValueString` writes into the existing string buffer if it's owned, but
     it will only do this if the new string is shorter than the original? Kinda
     weird, but avoids having to track the capacity of the buffer.
+- It would be Rust idiomatic to make the child list into a `Vec`, but that means
+  that the objects in the list don't have stable addresses, which can break
+  things like reference objects. We effectively need every object to be boxed,
+  so we could do a `Vec<Box<cJSON>>` (which is what with_plan_4 does), but that
+  adds extra indirection and we still need to maintain the linked list of
+  objects.
+- The `prev` pointer is tricky to handle, since it doesn't play well with Rust
+  ownership.
+  - Most of the logic doesn't use `prev`, so in theory we could just store it as
+    a raw pointer in the Rust struct and let the client C code read it. But
+    there are a couple of places where it does get dereferenced, mostly when
+    adding and removing elements from objects/arrays.
+  - Almost all of the places where we touch `prev` we also have access to the
+    parent object, which means in theory we could walk the list of children to
+    find the previous child without going through `prev`. That would impact
+    performance though, since we're going from a constant time operation to a
+    linear time one.
+- `ReplaceItemViaPointer` poses an aliasing problem. It takes a const ptr to the parent object, 
+
+# FFI Boundary Reasoning
+
+- Pointer at FFI boundary (in fns, specifically)
+  - Convert to ref.
+    - For input ptrs, the function is not taking ownership of the pointee.
+    - If mutation then mut ref, otherwise shared ref.
+    - For output ptrs, returned ptr must be derived from 
+  - Convert to slice.
+    - Is there ptr math? i.e. are we calculating an offset from the ptr?
+    - Need to be able to derive the length up front, which isn't always
+      possible.
+  - Convert to box.
+    - For input pointers, are we receiving ownership of an object that we
+      created? We need to control both object creation and object destruction
+      for box to be valid.
+    - For output pointers, are we giving away ownership that we expect to be
+      returned to us later?
+    - Good for alloc/delete function pairs, which is a common pattern.
+  - Convert to rc.
+    - We control construction and destruction, but we need shared ownership
+      through a thin ptr.
+    - Probably only correct if the original was also doing reference counting,
+      otherwise we're potentially changing the semantics of when the object is
+      deleted.
+  - Is the pointer typed? If not we need to reconstruct type info somehow.
+    Generally there's some additional context that's telling the C code what
+    type the pointer is, and the pointer is being cast to that type before being
+    dereferenced.
+- Pointer in data structures
+  - Does the data structure own the pointee? Then prolly box.
+  - Is the pointer an array? Then prolly vec.
+  - Does the pointee itself have pointers? Are we dealing with a graph of
+    objects? That's more complex to handle.
+    - Is it a DAG? That can potentially modeled with boxes. cJSON objects are
+      not quite a DAG because of the `prev` ptr, but we can effectively ignore
+      `prev` since the library internals never actually touch it.
+  - Is ownership overloaded? i.e. can the same pointer sometimes be owning and
+    sometimes be borrowing?
+    - If it's always owned then we can box, but if it's sometimes borrowed then
+      we can't.
+    - Sometimes we can do rc instead, but that may not always match the
+      semantics of the C.
+    - In cJSON we have the ability to create object references, where they don't
+      own their `child` ptr. This means we can't make `child` a box, but we also
+      don't want it to be an rc because then a reference object will prevent the
+      child object from being deleted when the actual owning parent gets
+      deleted.

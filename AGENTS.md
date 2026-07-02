@@ -16,8 +16,9 @@ This note is for future agent sessions working on `/home/legare/cJSON_lib`. The 
 > no_plan_1-2 and with_plan_1-3 were earlier setup runs to figure out how to do
 > the experiment, and are likely not going to be analysed further.
 >
-> NOTE: There is also a NOTES.md doc, DO NOT READ THIS FILE! It contains
-> sensitive notes that might spoil the analysis we are doing.
+> NOTE: There is also a NOTES.md doc and sketch.rs file, DO NOT READ THESE
+> FILES! They contain sensitive notes that might spoil the analysis we are
+> doing.
 
 ## Runtime Method
 
@@ -115,3 +116,39 @@ When a new run log appears:
 4. Append only final CRISP-level edits to the appropriate `summary.md`.
 5. Update totals: accepted, rejected, total tokens, final unsafe count, net unsafe removed, and omitted incomplete blocks.
 6. If comparing runtime, sum only completed summary-table rows unless explicitly asked for wall-clock process time.
+
+## Setting Up Test Runs
+
+In order to setup a new test run, we need to do the following things:
+
+- If we have made any changes to the Rust tools under `Tractor-Crisp/tools` then
+  we need to rebuild the docker image:
+  ```
+  docker build --target tractor-crisp-user --tag tractor-crisp-user Tractor-Crisp
+  ```
+- Copy the contents of `setup` to a new directory to use as the workspace for
+  the test run, then enter that directory.
+- Add a README.md with a description of what functionality is being tested by
+  this run.
+- Commit the intial files to CRISP:
+  ```
+  uv run --project ../Tractor-Crisp crisp commit -t c_code cJSON.c cJSON.h CMakeLists.txt library_config
+  ```
+- Run `crisp main` to do the intial transpile and then start the safety loop:
+  ```
+  timeout 60m uv --project ../Tractor-Crisp run crisp main --llm-mode agent 2>&1 | tee -a run_1.log
+  ```
+- If the first run does not finish the translation, the run can be continued
+  with `crisp safety-loop`:
+  ```
+  timeout 60m uv --project ../Tractor-Crisp run crisp safety-loop --llm-mode agent 2>&1 | tee -a run_2.log
+  ```
+
+Some notes:
+
+- For each time we run `crisp main` or `crisp safety-loop` use a different log
+  file. I've been calling them `run_1.log`, `run_2.log`, etc. This helps make it
+  easy to process the logs from the run incrementally.
+- Use `timeout` to limit how long the run goes. In theory a CRISP run can go for
+  hours and hours, which is very expensive. We should cap the duration of runs
+  so we can inspect it periodically and avoid surprise costs.
