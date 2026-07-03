@@ -130,25 +130,16 @@ In order to setup a new test run, we need to do the following things:
   the test run, then enter that directory.
 - Add a README.md with a description of what functionality is being tested by
   this run.
-- Commit the intial files to CRISP:
-  ```
-  uv run --project ../Tractor-Crisp crisp commit -t c_code cJSON.c cJSON.h CMakeLists.txt library_config
-  ```
-- Run `crisp main` to do the intial transpile and then start the safety loop:
-  ```
-  timeout 60m uv --project ../Tractor-Crisp run crisp main --llm-mode agent 2>&1 | tee -a run_1.log
-  ```
-- If the first run does not finish the translation, the run can be continued
-  with `crisp safety-loop`:
-  ```
-  timeout 60m uv --project ../Tractor-Crisp run crisp safety-loop --llm-mode agent 2>&1 | tee -a run_2.log
-  ```
+- Run the `init.sh` script to setup the CRISP workspace and do the initial transpile.
+- Edit `run.sh` to customize the run however necessary. Generally this should be
+  environment variables or CLI arguments to `crisp`.
+- Run `run.sh` one or more times until the translation is finished.
 
 Some notes:
 
-- For each time we run `crisp main` or `crisp safety-loop` use a different log
-  file. I've been calling them `run_1.log`, `run_2.log`, etc. This helps make it
-  easy to process the logs from the run incrementally.
+- Each invocation of `run.sh` produces a new log file timestamped to when the
+  run started. Breaking runs into separate logs makes it easy to incrementally
+  analyze runs that have been paused.
 - Use `timeout` to limit how long the run goes. In theory a CRISP run can go for
   hours and hours, which is very expensive. We should cap the duration of runs
   so we can inspect it periodically and avoid surprise costs.
