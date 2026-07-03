@@ -9,4 +9,5 @@ export CRISP_API_BASE=https://api.openai.com/v1
 
 uv --project ../Tractor-Crisp \
     run crisp safety-loop --llm-mode agent \
+    --resume-codex-session=rejected \
     2>&1 | tee -a "$log_file"
