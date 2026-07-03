@@ -1,0 +1,2 @@
+- Resume Codex session on every turn, i.e. one long session for the whole translation.
+- Use the short prompt on resuming the session, so maybe context will degrade over time?
