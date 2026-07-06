@@ -133,7 +133,9 @@ In order to setup a new test run, we need to do the following things:
 - Run the `init.sh` script to setup the CRISP workspace and do the initial transpile.
 - Edit `run.sh` to customize the run however necessary. Generally this should be
   environment variables or CLI arguments to `crisp`.
-- Run `run.sh` one or more times until the translation is finished.
+
+The user will then run `run.sh` one or more times with the necessary API key in
+order to perform the translation run.
 
 Some notes:
 

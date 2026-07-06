@@ -24,6 +24,8 @@
   - Doesn't handle `CreateStringReference` correctly, makes a copy of the owned
     data. That's the simpler/safer thing to do in Rust, but violates the
     semantics of the original API.
+- `persistent` family of runs test support for resuming the codex session
+  between turns of the CRISP loop.
 
 # Translation Notes
 
