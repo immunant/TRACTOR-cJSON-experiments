@@ -5,6 +5,8 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, 
 - Total accepted edits: 81
 - Total rejected edits: 1
 - Total tokens used: 8,057,385
+- Mean tokens per completed CRISP-level row: 98,261
+- Median tokens per completed CRISP-level row: 93,854
 - Total time: 5:39:24
 - Initial unsafe count: 1359
 - Final unsafe count after run 5: 0
