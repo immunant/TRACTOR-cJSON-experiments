@@ -1,19 +1,20 @@
 # persistent_rejected_1 CRISP run summary
 
-This summary covers the CRISP-level safety-loop attempts logged in `run_20260702_204852.log` and `run_20260706_105610.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
+This summary covers the CRISP-level safety-loop attempts logged in `run_20260702_204852.log`, `run_20260706_105610.log`, and `run_20260706_111119.log`. Each row is the final edit returned by one agent invocation, not every intermediate approach the agent tried internally before returning an edit to CRISP.
 
-This run used `--resume-codex-session=rejected`. The completed portion contains no CRISP-level rejected edits, so the logged completed turns all started as fresh Codex sessions rather than resumed rejection sessions.
+This run used `--resume-codex-session=rejected`. The first two logs contained no CRISP-level rejected edits, so those logged completed turns all started as fresh Codex sessions rather than resumed rejection sessions. `run_20260706_111119.log` includes one rejected CRISP-level edit at row 71, followed by an accepted resumed correction at row 72.
 
-- Total accepted edits: 38
-- Total rejected edits: 0
-- Total tokens used: 2,905,273
-- Total time: 1:11:40
+- Total accepted edits: 73
+- Total rejected edits: 1
+- Total tokens used: 6,431,548
+- Total time: 3:02:50
 - Initial unsafe count: 1359
-- Final unsafe count after `run_20260706_105610.log`: 689
-- Net unsafe operations removed by accepted edits: 670
+- Final unsafe count after `run_20260706_111119.log`: 140
+- Net unsafe operations removed by accepted edits: 1219
 - Omitted from the table:
   - `run_20260702_204852.log`: step 36 started at line 236890 with unsafe count `715`; the agent reported a completed printer refactor and used 125,929 tokens, but CRISP crashed before recording `do_safety_step_agent result[...]` with `docker.errors.NotFound: No such exec instance`.
   - `run_20260706_105610.log`: step 4 started at line 26737 with unsafe count `689`, but the short log ends immediately after launching the fresh Codex session and contains no agent result.
+  - `run_20260706_111119.log`: step 37 started at line 356104 with unsafe count `140`; it ran three agent-side `cargo check-unsafe2` attempts, including one rejected internal object-lookup closure variant, but the log ends with no final tokens block or CRISP result.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---|---|
@@ -55,3 +56,39 @@ This run used `--resume-codex-session=rejected`. The completed portion contains 
 | 36 | `run_20260706_105610.log:25` | 714 | -1 | 89,257 | Replaced the `print_number` NaN/infinity branch's C `sprintf` call with a safe stack-buffer slice copy of `null\0`; an attempted `print_string` inline refactor was rejected internally and recorded as a pitfall. | accepted |
 | 37 | `run_20260706_105610.log:8069` | 706 | -8 | 94,116 | Converted `update_offset` from an implementation-only raw-pointer helper to a safe helper taking `Option<&mut printbuffer>`, with callers passing local refs or using existing raw-pointer boundaries. | accepted |
 | 38 | `run_20260706_105610.log:16431` | 689 | -17 | 103,864 | Converted `buffer_skip_whitespace` from an unsafe raw-pointer helper to an `Option<&mut parse_buffer>` helper using bounded slices while preserving end-of-buffer offset behavior. | accepted |
+| 39 | `run_20260706_111119.log:25` | 637 | -52 | 84,705 | Refactored `parse_value` to create one bounded byte slice from the parse buffer and use safe byte checks for literals, strings, numbers, arrays, and objects; removed the unused `strncmp` import. | accepted |
+| 40 | `run_20260706_111119.log:6157` | 612 | -25 | 88,717 | Refactored `parse_number` to convert the nullable parse buffer once, scan input through a bounded slice, copy into the allocated C string with a mutable slice, and avoid `offset_from`. | accepted |
+| 41 | `run_20260706_111119.log:18419` | 607 | -5 | 60,835 | Changed `print_number` to write formatted output through a bounded mutable slice after `ensure` reserves space, removing raw output-pointer offset writes. | accepted |
+| 42 | `run_20260706_111119.log:24553` | 606 | -1 | 61,727 | Updated `print_value` to use bounded slice copies for literal outputs and `CStr` bytes for raw JSON values instead of `strlen`/`memcpy`; an internal variant increased unsafe calls and was avoided. | accepted |
+| 43 | `run_20260706_111119.log:27827` | 567 | -39 | 81,285 | Refactored `print_string_ptr` to use `CStr` and bounded byte slices for escaping/output writes instead of raw pointer walking plus `strcpy`/`memcpy`/`sprintf`. | accepted |
+| 44 | `run_20260706_111119.log:33282` | 567 | 0 | 59,614 | Changed `cJSON_strdup` to copy from `CStr::to_bytes_with_nul()` into a bounded mutable slice while preserving custom allocator behavior and null handling. | accepted |
+| 45 | `run_20260706_111119.log:40138` | 567 | 0 | 73,658 | Replaced `update_offset`'s C `strlen` call with a bounded scan within the print buffer from the current offset to the first NUL byte. | accepted |
+| 46 | `run_20260706_111119.log:48230` | 551 | -16 | 99,936 | Replaced unsafe raw pointer `offset` arithmetic with `wrapping_add` in `case_insensitive_strcmp`, `ensure`, `print_array`, and `print_object`; noted a rejected `suffix_object`-only variant. | accepted |
+| 47 | `run_20260706_111119.log:58895` | 550 | -1 | 83,981 | Replaced the `print` fallback finalization path's C `memcpy` and raw trailing-NUL write with bounded slice copies. | accepted |
+| 48 | `run_20260706_111119.log:66430` | 545 | -5 | 86,550 | Refactored `create_reference` to take `Option<&cJSON>` instead of a raw source pointer and clone nodes with a typed `core::ptr::write`. | accepted |
+| 49 | `run_20260706_111119.log:71787` | 523 | -22 | 194,009 | Removed no-op `.offset(0)` pointer arithmetic from parser helpers and `get_decimal_point`, and made `parse_value` use a local mutable parse-buffer reference. | accepted |
+| 50 | `run_20260706_111119.log:83787` | 482 | -41 | 94,334 | Refactored `parse_array` to use a local `&mut parse_buffer` and bounded content slice checks while preserving list construction, depth, and offset behavior. | accepted |
+| 51 | `run_20260706_111119.log:93428` | 427 | -55 | 57,819 | Refactored `parse_object` to use a local parse-buffer reference and bounded slice punctuation checks matching the `parse_array` pattern. | accepted |
+| 52 | `run_20260706_111119.log:100921` | 398 | -29 | 117,558 | Converted `ensure` from an unsafe raw-pointer helper to a safe `fn ensure(Option<&mut printbuffer>, ...)`, with callers passing mutable references; a slice-copy variant increased unsafe calls internally. | accepted |
+| 53 | `run_20260706_111119.log:113826` | 395 | -3 | 75,147 | Converted `get_decimal_point` from an unsafe `extern "C"` implementation helper into a safe internal Rust function containing the `localeconv` access. | accepted |
+| 54 | `run_20260706_111119.log:121088` | 387 | -8 | 78,794 | Converted `print_string` from a raw-pointer wrapper into a safe `fn(&cJSON, &mut printbuffer)`, with `print_value` converting raw inputs to references before dispatch. | accepted |
+| 55 | `run_20260706_111119.log:130039` | 348 | -39 | 102,539 | Converted `print_string_ptr` into a safe helper taking `Option<&CStr>` and `&mut printbuffer`, with `print_string` and `print_object` creating `CStr` views at raw boundaries. | accepted |
+| 56 | `run_20260706_111119.log:138217` | 334 | -14 | 71,493 | Reduced raw field access in `print_array` by converting item and output-buffer pointers to local references and passing safe references to helpers. | accepted |
+| 57 | `run_20260706_111119.log:146029` | 326 | -8 | 52,885 | Converted `print_number` into a safe helper taking `&cJSON` and `&mut printbuffer`, while preserving the existing C formatting path. | accepted |
+| 58 | `run_20260706_111119.log:153458` | 322 | -4 | 76,679 | Converted `print_array` from an unsafe raw-pointer implementation helper into a safe `fn(&cJSON, &mut printbuffer)`, updating `print_value` array dispatch. | accepted |
+| 59 | `run_20260706_111119.log:162526` | 318 | -4 | 107,474 | Converted `print_object` into a safe helper taking `&cJSON` and `&mut printbuffer`, with `print_value` calling it through existing safe references. | accepted |
+| 60 | `run_20260706_111119.log:168780` | 313 | -5 | 78,370 | Converted `print_value` into a safe helper taking `Option<&cJSON>` and `&mut printbuffer`, updating raw-boundary and recursive callers. | accepted |
+| 61 | `run_20260706_111119.log:176819` | 312 | -1 | 139,842 | Changed `buffer_skip_whitespace` to take an existing `&[u8]` input slice instead of rebuilding a slice from raw parse-buffer content. | accepted |
+| 62 | `run_20260706_111119.log:197466` | 306 | -6 | 81,824 | Converted `suffix_object` into a safe `fn(&mut cJSON, &mut cJSON)` and tightened `add_item_to_array` to convert validated raw pointers to references once. | accepted |
+| 63 | `run_20260706_111119.log:206186` | 299 | -7 | 126,920 | Converted `parse_value` from an unsafe raw-pointer helper into a safe `fn(&mut cJSON, &mut parse_buffer)` and updated parser call sites. | accepted |
+| 64 | `run_20260706_111119.log:214933` | 294 | -5 | 67,586 | Converted `parse_number` into a safe helper taking `&mut cJSON`, `&mut parse_buffer`, and the existing content slice from `parse_value`. | accepted |
+| 65 | `run_20260706_111119.log:223058` | 250 | -44 | 80,276 | Removed the raw `utf16_literal_to_utf8` bridge and reworked `parse_string` traversal to use safe slice indexes and the existing safe UTF-16 escape helper. | accepted |
+| 66 | `run_20260706_111119.log:232747` | 218 | -32 | 80,300 | Converted `parse_string` into a safe helper using `&mut cJSON`, `&mut parse_buffer`, and `&[u8]`, and replaced output-pointer increments with bounded slice indexing. | accepted |
+| 67 | `run_20260706_111119.log:246192` | 213 | -5 | 80,748 | Changed `parse_buffer.content` from a raw pointer to a safe `&[u8]`, updating parse initialization, whitespace/BOM handling, and parser helpers. | accepted |
+| 68 | `run_20260706_111119.log:257842` | 203 | -10 | 116,552 | Converted `parse_array` and `parse_object` into safe internal functions taking `&mut cJSON` and `&mut parse_buffer`, removing unsafe dispatch from `parse_value`. | accepted |
+| 69 | `run_20260706_111119.log:263970` | 190 | -13 | 90,982 | Converted `case_insensitive_strcmp` into a safe `&CStr` helper and reworked `get_object_item` to use safe `CStr` comparisons after raw-boundary conversion. | accepted |
+| 70 | `run_20260706_111119.log:271173` | 190 | 0 | 146,214 | Removed the C `memcpy` import and replaced print-buffer growth copying in `ensure` with `core::ptr::copy_nonoverlapping`; a slice-copy variant increased unsafe calls internally. | accepted |
+| 71 | `run_20260706_111119.log:277236` | 190 | 0 | 116,057 | Attempted to make `ensure` return `Option<&mut [c_uchar]>` and update printer writers to use slices, but CRISP rejected it because `ensure` raw pointer derefs increased from `0` to `2`. | rejected: unsafe check failed |
+| 72 | `run_20260706_111119.log:297766` | 166 | -24 | 271,979 | Corrected the rejected `ensure` slice-return refactor by avoiding `unsafe { &mut *raw_slice }`, using `core::slice::from_raw_parts_mut`, and preserving the safe slice writer updates. | accepted |
+| 73 | `run_20260706_111119.log:313715` | 164 | -2 | 105,388 | Converted internal `cJSON_strdup` from an unsafe raw-string helper to a safe Rust helper taking `Option<&CStr>`, with callers preserving null-check behavior. | accepted |
+| 74 | `run_20260706_111119.log:322385` | 140 | -24 | 133,498 | Replaced `static mut global_hooks` with a `Mutex<internal_hooks>`, added safe global hook helpers, and passed hook copies through parser, print, create, duplicate, object-add, replace, malloc, and free paths. | accepted |
