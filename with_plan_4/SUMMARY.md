@@ -9,6 +9,7 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_1.log`, 
 - Initial unsafe count: 1359
 - Final unsafe count after run 5: 0
 - Net unsafe operations removed by accepted edits: 1359
+- Average unsafe delta per completed CRISP-level row, including rejected rows: mean `-16.57`, median `-7.5`
 - Omitted from the table: one agent execution starting at `run_1.log:61122` failed before returning an edit (`codex-cli failed: exit code 137`); five initial `run_2.log` executions starting at `run_2.log:30`, `run_2.log:205`, `run_2.log:380`, `run_2.log:559`, and `run_2.log:738` failed before returning edits (`codex-cli failed: exit code 1`); trailing invocations starting at `run_1.log:382668`, `run_2.log:113688`, and `run_3.log:172746`, and `run_4.log:138799` appear incomplete in the logs.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |

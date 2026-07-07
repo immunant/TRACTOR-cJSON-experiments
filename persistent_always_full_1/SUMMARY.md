@@ -9,7 +9,8 @@ This summary covers the CRISP-level safety-loop attempts logged in `run_20260702
 - Initial unsafe count: 1359
 - Final unsafe count after `run_20260702_203601.log`: 1085
 - Net unsafe operations removed by accepted edits: 274
-- Omitted from the table: a trailing `do_safety_step_agent` marker at `run_20260702_203601.log:112677` did not reach an agent execution; CRISP immediately exited with `exiting due to lack of fuel: safety tries`.
+- Average unsafe delta per completed CRISP-level row, including rejected rows: mean `-6.09`, median `-4`
+- Omitted from the table: the trailing invocation starting at `run_20260702_203601.log:112677` did not return an edit; the log exits with `exiting due to lack of fuel: safety tries`.
 
 | # | Log start | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---|---|
