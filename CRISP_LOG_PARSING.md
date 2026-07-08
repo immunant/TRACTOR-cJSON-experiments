@@ -53,6 +53,14 @@ For each completed `do_safety_step_agent` block:
 
 Negative deltas mean the unsafe count went down. Zero-delta edits can still be accepted in the later experiments if CRISP was configured to allow neutral progress.
 
+## Mapping durations
+
+Summary tables should always include a per-row `Duration` column and a top-level `Total completed-step runtime` value.
+
+For each completed `do_safety_step_agent` block, measure duration from the first timestamped line inside that block through the last timestamped line before the next `do_safety_step_agent` block or final footer. Do not include trailing incomplete invocations, failed-before-returning invocations, or untimestamped wall-clock gaps outside completed rows unless the user explicitly asks for wall-clock process time.
+
+`parse_crisp_log.py` emits `duration` / `duration_seconds` on each step and `total_duration_completed` / `total_duration_seconds_completed` for each parsed log. When combining multiple logs into one run summary, sum `duration_seconds` across completed rows and format the total as `H:MM:SS`.
+
 ## Completion and rejection handling
 
 A completed CRISP-level edit is not the same as every attempted edit inside an agent transcript.
@@ -82,7 +90,7 @@ If a log ends in the middle of a diff or command output with no `tokens used`, r
 
 ## Small parser
 
-I also wrote `parse_crisp_log.py` next to this file. It extracts raw step data from one CRISP log and can emit JSON, TSV, or a Markdown table skeleton.
+I also wrote `parse_crisp_log.py` next to this file. It extracts raw step data from one CRISP log and can emit JSON, TSV, or a Markdown table skeleton. The TSV and Markdown outputs include per-row duration fields by default.
 
 Example:
 

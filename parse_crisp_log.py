@@ -20,6 +20,7 @@ RESULT_MARKER = "do_safety_step_agent result[0]"
 COUNT_RE = re.compile(r"(\d+) unsafe operations remaining")
 TOKEN_VALUE_RE = re.compile(r"([0-9,]+)\s*$")
 TIMESTAMP_RE = re.compile(r"^\[[^]]+\]\s*")
+TIMESTAMP_VALUE_RE = re.compile(r"^\[(\d\d):(\d\d):(\d\d)")
 AGENT_EXEC_RE = re.compile(r"^\[[^]]+\]\s*exec\s*$")
 CHECK_UNSAFE2_INCREASE_RE = re.compile(r": .*\bincreased: \d+ -> \d+")
 
@@ -38,6 +39,40 @@ SUMMARY_STOP_PREFIXES = (
 
 def strip_agent_prefix(line: str) -> str:
     return TIMESTAMP_RE.sub("", line).rstrip()
+
+
+def timestamp_seconds(line: str) -> int | None:
+    match = TIMESTAMP_VALUE_RE.match(line)
+    if not match:
+        return None
+    hours, minutes, seconds = (int(group) for group in match.groups())
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def format_duration(seconds: int | None) -> str:
+    if seconds is None:
+        return ""
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def block_duration_seconds(lines: list[str], start_idx: int, end_idx: int) -> int | None:
+    timestamps = [
+        seconds
+        for idx in range(start_idx, end_idx)
+        if (seconds := timestamp_seconds(lines[idx])) is not None
+    ]
+    if not timestamps:
+        return None
+    start = timestamps[0]
+    end = timestamps[-1]
+    if end < start:
+        end += 24 * 3600
+    return end - start
 
 
 def parse_token_and_summary(lines: list[str], start_idx: int, end_idx: int) -> tuple[int | None, int | None, list[str]]:
@@ -173,10 +208,13 @@ def parse_log(path: Path) -> dict[str, Any]:
         before_line, before_count = latest_count_before(counts, start_line)
         token_line, tokens_used, summary_lines = parse_token_and_summary(lines, start_idx, end_idx)
         check_unsafe2_runs = parse_agent_check_unsafe2_runs(lines, start_idx, end_idx)
+        duration_seconds = block_duration_seconds(lines, start_idx, end_idx)
 
         item: dict[str, Any] = {
             "step": step_index,
             "start_line": start_line,
+            "duration_seconds": duration_seconds,
+            "duration": format_duration(duration_seconds),
             "before_count_line": before_line,
             "before_count": before_count,
             "token_line": token_line,
@@ -222,6 +260,12 @@ def parse_log(path: Path) -> dict[str, Any]:
         "total_tokens_completed": sum(
             step["tokens_used"] or 0 for step in completed
         ),
+        "total_duration_seconds_completed": sum(
+            step["duration_seconds"] or 0 for step in completed
+        ),
+        "total_duration_completed": format_duration(
+            sum(step["duration_seconds"] or 0 for step in completed)
+        ),
         "agent_check_unsafe2_count": sum(
             step["agent_check_unsafe2_count"] for step in completed + incomplete
         ),
@@ -235,6 +279,8 @@ def emit_tsv(data: dict[str, Any]) -> str:
     columns = [
         "step",
         "start_line",
+        "duration",
+        "duration_seconds",
         "before_count",
         "after_count",
         "delta",
@@ -250,8 +296,8 @@ def emit_tsv(data: dict[str, Any]) -> str:
 
 def emit_markdown(data: dict[str, Any]) -> str:
     out = [
-        "| # | Log start | Unsafe count | Delta | Tokens used | Raw summary |",
-        "|---:|---|---:|---:|---:|---|",
+        "| # | Log start | Duration | Unsafe count | Delta | Tokens used | Raw summary |",
+        "|---:|---|---:|---:|---:|---:|---|",
     ]
     log_name = Path(data["log"]).name
     for idx, step in enumerate(data["completed_steps"], start=1):
@@ -264,7 +310,7 @@ def emit_markdown(data: dict[str, Any]) -> str:
         token_text = "" if tokens is None else f"{tokens:,}"
         out.append(
             f"| {idx} | `{log_name}:{step['start_line']}` | "
-            f"{after_text} | {delta_text} | {token_text} | {summary} |"
+            f"{step.get('duration') or ''} | {after_text} | {delta_text} | {token_text} | {summary} |"
         )
     return "\n".join(out)
 

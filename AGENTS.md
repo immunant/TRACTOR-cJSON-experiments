@@ -22,7 +22,9 @@ This note is for future agent sessions working on `/home/legare/cJSON_lib`. The 
 
 ## Runtime Method
 
-When asked for total runtime, we measured only completed CRISP-level safety-loop steps listed in the summary tables. The measurement is per completed row, from the first timestamp inside that row's `do_safety_step_agent` block through the last timestamp before the next step or final footer. This excludes trailing partial/incomplete blocks and omitted agent executions that failed before returning an edit.
+Summary files should always include duration data: a per-row `Duration` column and a top-level `Total completed-step runtime` field.
+
+Runtime is measured only for completed CRISP-level safety-loop steps listed in the summary tables. The measurement is per completed row, from the first timestamp inside that row's `do_safety_step_agent` block through the last timestamp before the next step or final footer. This excludes trailing partial/incomplete blocks and omitted agent executions that failed before returning an edit.
 
 | Run | Completed steps counted | Completed-step runtime |
 |---|---:|---:|
@@ -39,7 +41,7 @@ Rows can be:
 - `rejected: ...` - the agent returned an edit, but CRISP rejected it, usually because `compare_unsafe2_op` saw increased unsafe.
 - Omitted/incomplete - the log contains an agent invocation that did not return a completed edit, was killed, failed before returning, or was cut off by timeout.
 
-The `Unsafe count` column is the final unsafe count after the step. The `Delta` column is `new - old`, so negative numbers mean unsafe operations were removed.
+The `Duration` column is the completed-step elapsed time using the runtime method above. The `Unsafe count` column is the final unsafe count after the step. The `Delta` column is `new - old`, so negative numbers mean unsafe operations were removed.
 
 ## Log Parsing Workflow
 
@@ -55,6 +57,8 @@ Useful parser fields:
 - `completed_steps` - CRISP-level steps with `do_safety_step_agent result[...]`.
 - `incomplete_steps` - started agent invocations with no result.
 - `tokens_used` - parsed from the agent's final `tokens used` block.
+- `duration`, `duration_seconds` - elapsed time for the completed CRISP-level row.
+- `total_duration_completed`, `total_duration_seconds_completed` - sum of completed-row durations for the parsed log.
 - `before_count`, `after_count`, `delta` - unsafe count context from nearby `count_unsafe2` output.
 - `agent_check_unsafe2_runs` - `cargo check-unsafe2` invocations run by the agent inside the sandbox.
 - `agent_check_unsafe2_increase_count` - how many agent-side check invocations reported any increased unsafe count.
@@ -114,8 +118,8 @@ When a new run log appears:
 2. Check `completed_count`, `incomplete_count`, and any `result_hash = None` cases.
 3. Manually inspect rejected blocks around `compare_unsafe2_op`.
 4. Append only final CRISP-level edits to the appropriate `summary.md`.
-5. Update totals: accepted, rejected, total tokens, final unsafe count, net unsafe removed, and omitted incomplete blocks.
-6. If comparing runtime, sum only completed summary-table rows unless explicitly asked for wall-clock process time.
+5. Update totals: accepted, rejected, total completed-step runtime, total tokens, final unsafe count, net unsafe removed, and omitted incomplete blocks.
+6. Include a `Duration` column for every completed summary-table row. If comparing runtime, sum only completed summary-table rows unless explicitly asked for wall-clock process time.
 
 ## Setting Up Test Runs
 
