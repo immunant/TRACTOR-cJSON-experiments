@@ -48,9 +48,11 @@ The `Duration` column is the completed-step elapsed time using the runtime metho
 Use the parser:
 
 ```sh
-python3 /home/legare/cJSON_lib/parse_crisp_log.py --format tsv /home/legare/cJSON_lib/no_plan_3/run_7.log
-python3 /home/legare/cJSON_lib/parse_crisp_log.py --format json /home/legare/cJSON_lib/with_plan_4/run_5.log
+python3 -B /home/legare/cJSON_lib/parse_crisp_log.py --format tsv /home/legare/cJSON_lib/no_plan_3/run_7.log
+python3 -B /home/legare/cJSON_lib/parse_crisp_log.py --format json /home/legare/cJSON_lib/with_plan_4/run_5.log
 ```
+
+When running one-off Python helper snippets that import local project scripts, use `python3 -B` or set `PYTHONDONTWRITEBYTECODE=1` so Python does not create `__pycache__` / `.pyc` files in the working tree.
 
 Useful parser fields:
 
@@ -100,8 +102,8 @@ tar --exclude='*/target' -czf no_plan_3.tar.gz no_plan_3
 Parse a log:
 
 ```sh
-python3 parse_crisp_log.py --format tsv no_plan_3/run_7.log
-python3 parse_crisp_log.py --format json with_plan_4/run_5.log
+python3 -B parse_crisp_log.py --format tsv no_plan_3/run_7.log
+python3 -B parse_crisp_log.py --format json with_plan_4/run_5.log
 ```
 
 Search logs for rejected unsafe increases:
@@ -114,7 +116,7 @@ rg -n "increased:|do_safety_step_agent result\\[0\\] = None|compare_unsafe2_op|c
 
 When a new run log appears:
 
-1. Run `parse_crisp_log.py` on it.
+1. Run `parse_crisp_log.py` on it with `python3 -B` or `PYTHONDONTWRITEBYTECODE=1`.
 2. Check `completed_count`, `incomplete_count`, and any `result_hash = None` cases.
 3. Manually inspect rejected blocks around `compare_unsafe2_op`.
 4. Append only final CRISP-level edits to the appropriate `summary.md`.
