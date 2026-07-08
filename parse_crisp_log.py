@@ -23,6 +23,9 @@ TIMESTAMP_RE = re.compile(r"^\[[^]]+\]\s*")
 TIMESTAMP_VALUE_RE = re.compile(r"^\[(\d\d):(\d\d):(\d\d)")
 AGENT_EXEC_RE = re.compile(r"^\[[^]]+\]\s*exec\s*$")
 CHECK_UNSAFE2_INCREASE_RE = re.compile(r": .*\bincreased: \d+ -> \d+")
+CHECK_UNSAFE2_COMMAND_RE = re.compile(
+    r"(^|\n|[;&|]\s*|['\"])(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*cargo\s+check-unsafe2\b"
+)
 
 # Lines that usually mean the final assistant prose block has ended.
 SUMMARY_STOP_PREFIXES = (
@@ -148,7 +151,7 @@ def parse_agent_check_unsafe2_runs(lines: list[str], start_idx: int, end_idx: in
             cmd_end += 1
 
         command_text = "\n".join(command_lines)
-        if "cargo check-unsafe2" not in command_text:
+        if not CHECK_UNSAFE2_COMMAND_RE.search(command_text):
             idx = max(cmd_end + 1, idx + 1)
             continue
 
