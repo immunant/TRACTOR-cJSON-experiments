@@ -1,19 +1,19 @@
 # git_init_1 CRISP run summary
 
-This summary covers the completed CRISP-level safety-loop edits in `run_20260710_134831.log`. Each row is the final edit returned by one agent invocation, rather than its intermediate sandbox attempts.
+This summary covers the completed CRISP-level safety-loop edits in `run_20260710_134831.log` and `run_20260714_130843.log`. Each row is the final edit returned by one agent invocation, rather than its intermediate sandbox attempts.
 
-- Total accepted edits: 45
-- Total rejected edits: 0
-- Total tokens used: 4,615,655
-- Mean tokens per completed CRISP-level row: 102,570
-- Median tokens per completed CRISP-level row: 96,429
-- Total completed-step runtime: 1:43:50
+- Total accepted edits: 72
+- Total rejected edits: 1
+- Total tokens used: 9,287,096
+- Mean tokens per completed CRISP-level row: 127,220
+- Median tokens per completed CRISP-level row: 111,346
+- Total completed-step runtime: 3:36:30
 - Initial unsafe count: 1,359
-- Final unsafe count: 297
-- Net unsafe operations removed by accepted edits: 1,062
-- Omitted from the table: the final invocation beginning at `run_20260710_134831.log:294737` did not start an agent turn because the safety-loop fuel limit was reached.
+- Final unsafe count after `run_20260714_130843.log`: 6
+- Net unsafe operations removed by accepted edits: 1,353
+- Omitted from the table: the final block beginning at `run_20260710_134831.log:294737` did not start an agent turn because the safety-loop fuel limit was reached. The trailing invocation beginning at `run_20260714_130843.log:307456` is incomplete because the log ends during the agent's source diff.
 
-The sandbox Git baseline was exercised throughout the run: the agent used `git diff` and `git status` repeatedly, with no `not a git repository` error in the log.
+The sandbox Git baseline was exercised throughout both logs. In the second log, all 185 agent shell commands containing Git completed successfully. The agent did not try to search commit history with `git log`, `git reflog`, `git rev-list`, `git blame`, or similar commands. Beyond `git diff` and `git status`, it used `git ls-files` to inspect untracked files, `git show HEAD:unsafe_json/cjson.json` to restore the baseline unsafe report, and `git restore unsafe_json/cjson.json`; these operations worked. The report restoration followed unsuccessful attempts to regenerate the JSON, but the Git commands themselves did not fail.
 
 | # | Log start | Duration | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---:|---|---|
@@ -62,3 +62,31 @@ The sandbox Git baseline was exercised throughout the run: the agent used `git d
 | 43 | `run_20260710_134831.log:274999` | 2:36 | 304 | -2 | 96,598 | Removed raw `parse_buffer.content` and made array/object parsing take `&mut parse_buffer`. | accepted |
 | 44 | `run_20260710_134831.log:281557` | 2:30 | 299 | -5 | 97,932 | Made `parse_string` take `&mut cJSON` and reduced object-parser dereferences. | accepted |
 | 45 | `run_20260710_134831.log:287580` | 3:17 | 297 | -2 | 169,654 | Made `parse_value` take `&mut cJSON` and updated parser call sites. | accepted |
+| 46 | `run_20260714_130843.log:25` | 4:35 | 287 | -10 | 200,622 | Made `parse_array` and `parse_object` safe `&mut cJSON` helpers and removed unsafe dispatch from `parse_value`. | accepted |
+| 47 | `run_20260714_130843.log:15006` | 2:03 | 286 | -1 | 102,085 | Replaced `parse_number`'s unsafe `offset_from` with provenance-address subtraction. | accepted |
+| 48 | `run_20260714_130843.log:18342` | 3:26 | 284 | -2 | 188,656 | Changed `cJSON_strdup` to accept a byte slice and use safe length/copy operations. | accepted |
+| 49 | `run_20260714_130843.log:24253` | 2:12 | 280 | -4 | 89,616 | Used safe mutable tail references for parser child-list linking. | accepted |
+| 50 | `run_20260714_130843.log:29437` | 2:20 | 276 | -4 | 142,705 | Made `cJSON_New_Item` a safe implementation helper while preserving hook allocation and zeroing. | accepted |
+| 51 | `run_20260714_130843.log:32731` | 3:51 | 273 | -3 | 119,452 | Reworked `parse_string` around a safe `Vec<u8>` and centralized final string allocation in `cJSON_strdup`. | accepted |
+| 52 | `run_20260714_130843.log:42151` | 3:28 | 271 | -2 | 176,096 | Collected parser children as safe mutable references and rebuilt sibling links with safe writes. | accepted |
+| 53 | `run_20260714_130843.log:48764` | 3:16 | 264 | -7 | 111,346 | Made `create_reference` accept `Option<&cJSON>` and replaced raw copying/field writes with a normal value copy. | accepted |
+| 54 | `run_20260714_130843.log:53809` | 2:15 | 258 | -6 | 97,258 | Made `print_string` take `&cJSON` and reduced `print_value` to one checked item reference. | accepted |
+| 55 | `run_20260714_130843.log:59127` | 4:11 | 154 | -104 | 117,585 | Threaded `&mut printbuffer` through printer helpers and preserved raw conversion only in exported wrappers. | accepted |
+| 56 | `run_20260714_130843.log:80254` | 3:11 | 112 | -42 | 105,637 | Rewrote `print_string_ptr` around `Option<&CStr>`, safe byte scanning, and `Vec<u8>` escaping. | accepted |
+| 57 | `run_20260714_130843.log:90405` | 7:07 | 44 | -68 | 251,943 | Replaced raw printer-buffer storage with owned `Vec<u8>` or borrowed slices and made the core printer helpers safe. | accepted |
+| 58 | `run_20260714_130843.log:122282` | 4:50 | 44 | 0 | 418,307 | Replaced C number formatting with a Rust `format_number_g` helper, but CRISP rejected the edit because `format_number_g` unsafe function calls increased from 0 to 2. | rejected: unsafe function calls increased |
+| 59 | `run_20260714_130843.log:132917` | 5:05 | 43 | -1 | 209,589 | Replaced `sprintf`/`sscanf` number formatting with a revised safe Rust formatter and validated output against C over 31,280 values. | accepted |
+| 60 | `run_20260714_130843.log:141997` | 4:31 | 30 | -13 | 130,899 | Converted add-item helpers to safe item references and object names to `&CStr`. | accepted |
+| 61 | `run_20260714_130843.log:153102` | 4:58 | 29 | -1 | 174,997 | Removed the private `create_reference` helper and moved reference initialization into exported wrappers. | accepted |
+| 62 | `run_20260714_130843.log:160182` | 9:06 | 27 | -2 | 339,297 | Introduced a safe `ArrayAppendTarget` and moved raw list traversal preparation into FFI wrappers. | accepted |
+| 63 | `run_20260714_130843.log:201747` | 1:41 | 26 | -1 | 67,232 | Moved old object-key deallocation from `add_item_to_object` into exported FFI wrappers. | accepted |
+| 64 | `run_20260714_130843.log:206142` | 2:54 | 17 | -9 | 197,731 | Replaced `parse_number`'s temporary allocation, `strtod`, locale access, and deallocation with safe Rust parsing. | accepted |
+| 65 | `run_20260714_130843.log:215081` | 2:57 | 15 | -2 | 177,141 | Added `Default` for `cJSON`, allocated nodes with `Box`, and removed `memset`. | accepted |
+| 66 | `run_20260714_130843.log:222224` | 3:05 | 14 | -1 | 123,944 | Added boxed node construction and kept parser children owned until linked-list handoff. | accepted |
+| 67 | `run_20260714_130843.log:232810` | 4:33 | 14 | 0 | 141,147 | Removed the raw-pointer-returning `cJSON_New_Item`; raw `Box` handoff now occurs only in exported FFI functions. | accepted |
+| 68 | `run_20260714_130843.log:240940` | 5:35 | 12 | -2 | 200,728 | Backed duplicated strings with registered `Vec<u8>` allocations and taught cleanup paths to reclaim them safely. | accepted |
+| 69 | `run_20260714_130843.log:253541` | 2:31 | 11 | -1 | 119,881 | Added safe registered-string byte lookup and used it for raw-value printing. | accepted |
+| 70 | `run_20260714_130843.log:260260` | 4:11 | 10 | -1 | 128,904 | Added cached safe `CStr` views for borrowed value strings and removed implementation-side pointer conversion during printing. | accepted |
+| 71 | `run_20260714_130843.log:269846` | 2:18 | 9 | -1 | 95,478 | Added safe object-key views and registry lookup, removing implementation-side `CStr::from_ptr` from object printing. | accepted |
+| 72 | `run_20260714_130843.log:279666` | 8:12 | 6 | -3 | 318,018 | Added transient owned parser children and safe cleanup, removing two parse-error calls to `cJSON_Delete_ffi`. | accepted |
+| 73 | `run_20260714_130843.log:296187` | 4:18 | 6 | 0 | 125,147 | Added safe owned constructors for simple values while retaining boxing and C-input conversion at FFI boundaries. | accepted |
