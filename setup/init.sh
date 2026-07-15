@@ -4,7 +4,7 @@ set -euo pipefail
 # Commit the initial set of files.
 uv run --project ../Tractor-Crisp \
     crisp commit -t c_code \
-    cJSON.c cJSON.h CMakeLists.txt library_config
+    cJSON.c cJSON.h CMakeLists.txt library_config tests test_translated.sh
 
 # Run `crisp main` through the deterministic setup stages, then stop before the
 # first LLM/agent safety rewrite. The safety step consumes fuel before invoking
