@@ -20,3 +20,5 @@ test framework needed to compile them are included in this experiment.
 
 Run `./init.sh` once to initialize/transpile the CRISP workspace. Afterwards,
 run `bash ./test_translated.sh` to exercise the same command used by CRISP.
+
+agent: gpt-5.5
