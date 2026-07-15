@@ -1,0 +1,45 @@
+base_dir = "."
+
+# This will be used as the name of the generated binary or library.
+project_name = "cjson"
+
+# Glob pattern that matches all relevant source files emitted by the transpile
+# step.  Only files matching this pattern will be passed to the LLM for
+# editing.
+src_globs = "rust/src/*.rs"
+# This can also be a list of globs:
+#src_globs = ["rust/src/*.rs", "rust/src/*/*.rs"]
+
+# CRISP runs these shell commands to check whether translation steps correctly
+# preserve the behavior of the original program.  The example `test_command`
+# just builds the code, but doesn't test it; you may wish to add additional
+# steps to build and run project-specific test cases.  The `test_command`
+# should exit with code 0 on success (e.g. when the tests pass) and nonzero
+# otherwise.
+test_command = """
+set -e
+bash ./test_translated.sh
+"""
+
+
+[transpile]
+
+# Directory containing the main `CMakeLists.txt` for the C project.
+# cmake_src_dir = "."
+
+# Where to output the generated Rust code.  If you change this, also change
+# `src_globs` above to match.
+output_dir = "rust"
+
+# If the C project produces a binary instead of a library, uncomment this.
+#bin_main = "main"
+
+# If this is set to the name of a CMake target, only source files relevant to
+# that target will be transpiled.  Otherwise, all source files from all targets
+# will be transpiled.
+# single_target = "target_name"
+
+[[transpile.artifacts]]
+name = "cjson"
+configure_cmds = "cmake -B build . -DENABLE_CJSON_TEST=OFF -DENABLE_CJSON_UTILS=OFF -DBUILD_SHARED_AND_STATIC_LIBS=OFF"
+build_cmds = "cmake --build build --target cjson"

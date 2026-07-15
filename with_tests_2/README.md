@@ -1,0 +1,3 @@
+- cJSON test suite is enabled.
+- Testing Git repo in the sandbox: https://github.com/GaloisInc/Tractor-Crisp/pull/159
+- agent: gpt-5.6-terra
