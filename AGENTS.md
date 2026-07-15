@@ -130,7 +130,7 @@ In order to setup a new test run, we need to do the following things:
 - If we have made any changes to the Rust tools under `Tractor-Crisp/tools` then
   we need to rebuild the docker image:
   ```
-  docker build --target tractor-crisp-user --tag tractor-crisp-user Tractor-Crisp
+  docker build --target tractor-crisp-user --tag legare-tractor-crisp-user Tractor-Crisp
   ```
 - Copy the contents of `setup` to a new directory to use as the workspace for
   the test run, then enter that directory.
