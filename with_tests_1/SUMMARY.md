@@ -1,26 +1,34 @@
 # with_tests_1 CRISP run summary
 
 This summary covers the completed CRISP-level safety-loop edits in
-`run_20260714_225119.log`. Each row is the final edit returned by one agent
-invocation, rather than its intermediate sandbox attempts.
+`run_20260714_225119.log` and `run_20260715_000842.log`. Each row is the final
+edit returned by one agent invocation, rather than its intermediate sandbox
+attempts.
 
-- Total accepted edits: 32
-- Total rejected edits: 0
-- Total tokens used: 2,945,590
-- Mean tokens per completed CRISP-level row: 92,050
-- Median tokens per completed CRISP-level row: 77,245
-- Total completed-step runtime: 1:04:30
+- Total accepted edits: 74
+- Total rejected edits: 1
+- Total tokens used: 8,923,329
+- Mean tokens per completed CRISP-level row: 118,978
+- Median tokens per completed CRISP-level row: 108,720
+- Total completed-step runtime: 3:12:16
 - Initial unsafe count: 1,359
-- Final unsafe count: 722
-- Net unsafe operations removed by accepted edits: 637
-- Average unsafe delta per completed CRISP-level row: mean `-19.91`, median `-11.5`
+- Final unsafe count: 36
+- Net unsafe operations removed by accepted edits: 1,323
+- Average unsafe delta per completed CRISP-level row, including the rejected row: mean `-17.64`, median `-10`
 - Omitted from the table: the trailing invocation beginning at
   `run_20260714_225119.log:202217` is incomplete; the log ends three seconds
-  into the agent's initial source inspection, before it returned an edit.
+  into the agent's initial source inspection, before it returned an edit. Four
+  executions beginning at `run_20260715_000842.log:394673`,
+  `run_20260715_000842.log:402462`, `run_20260715_000842.log:404617`, and
+  `run_20260715_000842.log:407227` also returned no edit because Codex exited
+  with status 137. Combined with the preceding rejected row, these caused the
+  second run to stop after five consecutive failures.
 
-All 32 returned edits were accepted by CRISP. Six intermediate agent-side
-`cargo check-unsafe2` runs reported increases, but the agent revised or
-discarded those approaches before returning the final edits represented here.
+The first 74 returned edits were accepted by CRISP. The final returned edit was
+rejected after the CRISP-level `check-unsafe2` process panicked while reading a
+diagnostic missing its `filename` field; its code and tests had otherwise
+completed. Across both logs, 28 intermediate agent-side `cargo check-unsafe2`
+runs reported increases, but the agent revised or discarded those approaches.
 The translated-library test command reported all 18 C test executables passing
 throughout the completed rows.
 
@@ -58,3 +66,46 @@ throughout the completed rows.
 | 30 | `run_20260714_225119.log:185669` | 1:03 | 755 | -9 | 64,119 | Moved true, false, and boolean constructors into exported wrappers and updated object-add callers. | accepted |
 | 31 | `run_20260714_225119.log:189054` | 1:33 | 725 | -30 | 81,080 | Moved null, number, string, raw, array, and object constructors into exported FFI wrappers. | accepted |
 | 32 | `run_20260714_225119.log:196396` | 1:38 | 722 | -3 | 71,758 | Removed private `get_array_item`; raw traversal now resides only in the exported array access/detach/insert/replace wrappers. | accepted |
+| 33 | `run_20260715_000842.log:25` | 1:10 | 713 | -9 | 67,573 | Removed private `create_reference` and kept its behavior inside the exported array/object reference-add wrappers. | accepted |
+| 34 | `run_20260715_000842.log:3601` | 3:08 | 707 | -6 | 116,431 | Converted `cJSON_New_Item` to a safe Rust helper taking `&internal_hooks` and updated parser callers. | accepted |
+| 35 | `run_20260715_000842.log:9496` | 2:39 | 703 | -4 | 150,298 | Made `cJSON_strdup` a safe `CStr`/hook-reference helper returning `Option<NonNull<_>>`, and changed object-add hook input to a reference. | accepted |
+| 36 | `run_20260715_000842.log:16807` | 1:55 | 695 | -8 | 165,156 | Converted `update_offset` to a safe optional print-buffer reference helper using `CStr` length. | accepted |
+| 37 | `run_20260715_000842.log:20915` | 3:07 | 680 | -15 | 135,108 | Converted array/object item-add helpers to safe mutable node references and `&CStr`, leaving raw handling in FFI wrappers. | accepted |
+| 38 | `run_20260715_000842.log:31559` | 1:53 | 680 | 0 | 60,611 | Removed the unused private `cJSON_GetStringValue` raw-pointer trampoline while preserving its exported wrapper. | accepted |
+| 39 | `run_20260715_000842.log:34678` | 1:41 | 651 | -29 | 69,913 | Changed private `print` to take hook references and manage its local `printbuffer` as a normal stack value. | accepted |
+| 40 | `run_20260715_000842.log:39261` | 1:49 | 624 | -27 | 85,303 | Converted whitespace and UTF-8 BOM parser helpers to safe optional parse-buffer references. | accepted |
+| 41 | `run_20260715_000842.log:45345` | 2:47 | 593 | -31 | 146,486 | Converted printer `ensure` to a safe optional print-buffer reference helper and updated its callers. | accepted |
+| 42 | `run_20260715_000842.log:59002` | 2:54 | 577 | -16 | 221,403 | Made decimal-point lookup safe, converted `print_number` to safe references, and reduced raw dispatch in `print_value`. | accepted |
+| 43 | `run_20260715_000842.log:68632` | 3:34 | 500 | -77 | 124,876 | Rewrote string printing around `CStr`, bounded output slices, and safe copying; made `print_string` reference-based. | accepted |
+| 44 | `run_20260715_000842.log:83643` | 2:26 | 472 | -28 | 163,489 | Converted private `print`, `print_value`, `print_array`, and `print_object` API boundaries to safe item/print-buffer references. | accepted |
+| 45 | `run_20260715_000842.log:94322` | 3:03 | 451 | -21 | 315,283 | Converted `get_object_item` and `cJSON_Compare` to safe `Option<&cJSON>`/`Option<&CStr>` boundaries while preserving exported raw ABIs. | accepted |
+| 46 | `run_20260715_000842.log:105815` | 2:32 | 436 | -15 | 209,422 | Replaced raw pointer `.offset()` calls with `wrapping_add()` in number, array, object, and top-level printing. | accepted |
+| 47 | `run_20260715_000842.log:113261` | 4:45 | 287 | -149 | 139,720 | Converted number/value/array/object parser helper parameters to node and parse-buffer references. | accepted |
+| 48 | `run_20260715_000842.log:146874` | 1:54 | 260 | -27 | 139,255 | Converted private `parse_string` from raw parameters to node and parse-buffer references. | accepted |
+| 49 | `run_20260715_000842.log:153967` | 3:18 | 235 | -25 | 191,419 | Reworked parser byte dispatch and whitespace/BOM handling around slice checks instead of raw dereferences and `strncmp`. | accepted |
+| 50 | `run_20260715_000842.log:166495` | 1:55 | 208 | -27 | 73,970 | Threaded safe input slices into array/object parsing and replaced delimiter/comma raw dereferences with slice lookups. | accepted |
+| 51 | `run_20260715_000842.log:173222` | 3:28 | 173 | -35 | 242,266 | Made `parse_string` safe by reading from the parser byte slice and removed unsafe string-parser dispatch. | accepted |
+| 52 | `run_20260715_000842.log:184315` | 2:00 | 163 | -10 | 141,835 | Converted private recursive duplication to take `&cJSON`, leaving raw input conversion in exported wrappers. | accepted |
+| 53 | `run_20260715_000842.log:190998` | 2:09 | 153 | -10 | 100,205 | Reworked `parse_number` input scanning and temporary copying around safe slices while preserving `strtod` behavior. | accepted |
+| 54 | `run_20260715_000842.log:196874` | 4:39 | 142 | -11 | 194,428 | Changed `parse_buffer.content` to a borrowed slice and moved raw parse input/output reconstruction into the exported wrapper. | accepted |
+| 55 | `run_20260715_000842.log:210026` | 2:56 | 136 | -6 | 152,945 | Built parser child lists through safe `add_item_to_array` calls instead of directly linking local raw nodes. | accepted |
+| 56 | `run_20260715_000842.log:217907` | 2:28 | 132 | -4 | 93,787 | Made `parse_array` and `parse_object` safe functions, localizing their remaining allocation and cleanup unsafe blocks. | accepted |
+| 57 | `run_20260715_000842.log:224200` | 5:46 | 132 | 0 | 183,503 | Removed the private raw null-pointer constant and its no-op post-free assignment. | accepted |
+| 58 | `run_20260715_000842.log:240047` | 2:35 | 115 | -17 | 103,532 | Removed private `cJSON_Delete`, moved deletion into its exported FFI entry point, and retargeted internal cleanup calls. | accepted |
+| 59 | `run_20260715_000842.log:246095` | 3:59 | 102 | -13 | 94,276 | Made private recursive duplication safe and used `add_item_to_array` for duplicated-child linking. | accepted |
+| 60 | `run_20260715_000842.log:253825` | 2:45 | 98 | -4 | 126,739 | Made `print_value` safe and replaced literal/raw C copying calls with byte-slice copies. | accepted |
+| 61 | `run_20260715_000842.log:260441` | 2:27 | 96 | -2 | 100,733 | Made `print_array` safe and localized its remaining raw writes and child-link access. | accepted |
+| 62 | `run_20260715_000842.log:267983` | 1:00 | 94 | -2 | 61,591 | Made `print_object` safe and localized its existing raw output writes and key conversions. | accepted |
+| 63 | `run_20260715_000842.log:272367` | 2:04 | 93 | -1 | 90,946 | Made private `print` safe, retaining required hook operations and final raw copying in explicit unsafe blocks. | accepted |
+| 64 | `run_20260715_000842.log:280726` | 3:05 | 88 | -5 | 100,169 | Reworked number, string, and scalar-value printing to write through bounded slices and shared safe copy paths. | accepted |
+| 65 | `run_20260715_000842.log:291519` | 2:20 | 82 | -6 | 101,056 | Replaced `parse_number` temporary allocation, `strtod`, pointer arithmetic, and deallocation with safe longest-prefix Rust parsing. | accepted |
+| 66 | `run_20260715_000842.log:297176` | 2:04 | 81 | -1 | 127,842 | Removed `update_offset` and advanced known print-buffer offsets directly at write sites. | accepted |
+| 67 | `run_20260715_000842.log:303316` | 5:44 | 49 | -32 | 172,560 | Replaced raw print-buffer storage with owned `Vec<u8>` or borrowed slices and made `ensure` return bounded slices. | accepted |
+| 68 | `run_20260715_000842.log:332872` | 3:59 | 45 | -4 | 108,526 | Replaced locale/`sprintf`/`sscanf` number printing with safe Rust formatting and removed the unused C declarations. | accepted |
+| 69 | `run_20260715_000842.log:343150` | 4:02 | 44 | -1 | 131,303 | Decoded JSON strings into `Vec<u8>` and made UTF-16 conversion append safely before final hook allocation. | accepted |
+| 70 | `run_20260715_000842.log:351864` | 2:17 | 44 | 0 | 110,970 | Replaced `memset` node initialization with `empty_cjson()` and removed the unused C import. | accepted |
+| 71 | `run_20260715_000842.log:357278` | 3:44 | 42 | -2 | 250,646 | Made internal `print` return `Vec<u8>`, moving final C allocation into exported print wrappers, and removed print-buffer hooks. | accepted |
+| 72 | `run_20260715_000842.log:366771` | 3:37 | 40 | -2 | 108,720 | Changed `get_object_item` to return borrowed `&cJSON` results and used them directly in object comparison. | accepted |
+| 73 | `run_20260715_000842.log:373497` | 5:08 | 38 | -2 | 116,276 | Attached partially parsed child lists to their parent so caller-owned deletion handles array/object parse failures safely. | accepted |
+| 74 | `run_20260715_000842.log:379553` | 2:57 | 36 | -2 | 190,652 | Made internal root parsing return `Result<success_offset, error_offset>`, keeping allocation and raw parse outputs in the FFI wrapper. | accepted |
+| 75 | `run_20260715_000842.log:388209` | 4:03 | 36 | 0 | 196,517 | Reworked scalar string/raw comparison to use identical-pointer fast paths and safe printed bytes; tests passed, but CRISP's final unsafe comparison crashed on a diagnostic missing `filename`. | rejected: `check-unsafe2` crashed |
