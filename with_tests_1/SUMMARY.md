@@ -1,20 +1,20 @@
 # with_tests_1 CRISP run summary
 
 This summary covers the completed CRISP-level safety-loop edits in
-`run_20260714_225119.log` and `run_20260715_000842.log`. Each row is the final
-edit returned by one agent invocation, rather than its intermediate sandbox
-attempts.
+`run_20260714_225119.log`, `run_20260715_000842.log`, and
+`run_20260715_095541.log`. Each row is the final edit returned by one agent
+invocation, rather than its intermediate sandbox attempts.
 
-- Total accepted edits: 74
-- Total rejected edits: 1
-- Total tokens used: 8,923,329
-- Mean tokens per completed CRISP-level row: 118,978
-- Median tokens per completed CRISP-level row: 108,720
-- Total completed-step runtime: 3:12:16
+- Total accepted edits: 90
+- Total rejected edits: 2
+- Total tokens used: 13,040,533
+- Mean tokens per completed CRISP-level row: 141,745
+- Median tokens per completed CRISP-level row: 118,361.5
+- Total completed-step runtime: 4:55:23
 - Initial unsafe count: 1,359
-- Final unsafe count: 36
-- Net unsafe operations removed by accepted edits: 1,323
-- Average unsafe delta per completed CRISP-level row, including the rejected row: mean `-17.64`, median `-10`
+- Final unsafe count: 0
+- Net unsafe operations removed by accepted edits: 1,359
+- Average unsafe delta per completed CRISP-level row, including rejected rows: mean `-14.77`, median `-6`
 - Omitted from the table: the trailing invocation beginning at
   `run_20260714_225119.log:202217` is incomplete; the log ends three seconds
   into the agent's initial source inspection, before it returned an edit. Four
@@ -24,13 +24,16 @@ attempts.
   with status 137. Combined with the preceding rejected row, these caused the
   second run to stop after five consecutive failures.
 
-The first 74 returned edits were accepted by CRISP. The final returned edit was
-rejected after the CRISP-level `check-unsafe2` process panicked while reading a
-diagnostic missing its `filename` field; its code and tests had otherwise
-completed. Across both logs, 28 intermediate agent-side `cargo check-unsafe2`
-runs reported increases, but the agent revised or discarded those approaches.
-The translated-library test command reported all 18 C test executables passing
-throughout the completed rows.
+The first 74 returned edits were accepted by CRISP. Row 75 was rejected after
+the CRISP-level `check-unsafe2` process panicked while reading a diagnostic
+missing its `filename` field; its code and tests had otherwise completed. The
+third log resumed from 36 unsafe operations and reached 0 in 17 completed rows.
+Its row 81 was rejected because `format_g_with_rust_fmt` increased unsafe
+function calls from 0 to 2; all 18 tests passed before that rejection. Across
+the three logs, 36 intermediate agent-side `cargo check-unsafe2` runs reported
+increases, but the agent revised or discarded those approaches. The
+translated-library test command reported all 18 C test executables passing
+throughout the completed rows, and the final test exit code was 0.
 
 | # | Log start | Duration | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---:|---|---|
@@ -109,3 +112,20 @@ throughout the completed rows.
 | 73 | `run_20260715_000842.log:373497` | 5:08 | 38 | -2 | 116,276 | Attached partially parsed child lists to their parent so caller-owned deletion handles array/object parse failures safely. | accepted |
 | 74 | `run_20260715_000842.log:379553` | 2:57 | 36 | -2 | 190,652 | Made internal root parsing return `Result<success_offset, error_offset>`, keeping allocation and raw parse outputs in the FFI wrapper. | accepted |
 | 75 | `run_20260715_000842.log:388209` | 4:03 | 36 | 0 | 196,517 | Reworked scalar string/raw comparison to use identical-pointer fast paths and safe printed bytes; tests passed, but CRISP's final unsafe comparison crashed on a diagnostic missing `filename`. | rejected: `check-unsafe2` crashed |
+| 76 | `run_20260715_095541.log:25` | 3:43 | 35 | -1 | 126,586 | Removed private `print_string` and folded string printing into `print_value` through the existing pointer-based path. | accepted |
+| 77 | `run_20260715_095541.log:7966` | 7:59 | 35 | 0 | 355,839 | Removed remaining libc string/copy imports, replaced their uses with slices and `CStr`, and made `cJSON_strdup` return hook-allocated `MaybeUninit` storage. | accepted |
+| 78 | `run_20260715_095541.log:19849` | 7:03 | 34 | -1 | 288,077 | Changed `cJSON_New_Item` to return `Option<NonNull<cJSON>>` and recursive duplication to return an optional mutable reference. | accepted |
+| 79 | `run_20260715_095541.log:53453` | 8:47 | 34 | 0 | 329,815 | Reverted two nonviable small refactors and returned only updated safety-plan findings, leaving the Rust code unchanged. | accepted |
+| 80 | `run_20260715_095541.log:70540` | 6:31 | 31 | -3 | 284,169 | Changed `cJSON_New_Item` to return `Option<&mut cJSON>`, initialized allocation through `MaybeUninit::write`, and updated callers to use references. | accepted |
+| 81 | `run_20260715_095541.log:84127` | 8:24 | 31 | 0 | 387,894 | Replaced the 15-digit number-formatting candidate with `lexical-write-float`; tests passed, but the new formatting helper added two unsafe calls. | rejected: unsafe calls increased |
+| 82 | `run_20260715_095541.log:97952` | 6:15 | 27 | -4 | 306,574 | Snapshotted raw input trees into safe `printable_cjson` values so internal array, object, and value printers use references and `Vec` children. | accepted |
+| 83 | `run_20260715_095541.log:117539` | 2:24 | 19 | -8 | 97,429 | Refactored internal comparison and object lookup to operate on safe `printable_cjson` trees, leaving raw conversion at the exported boundary. | accepted |
+| 84 | `run_20260715_095541.log:125096` | 2:09 | 17 | -2 | 67,353 | Removed private unsafe `get_object_item`, added a safe name matcher, and confined raw traversal to exported-wrapper macros. | accepted |
+| 85 | `run_20260715_095541.log:131170` | 6:53 | 15 | -2 | 288,527 | Removed private raw `add_item_to_array` and linked implementation-side child collections through safe references. | accepted |
+| 86 | `run_20260715_095541.log:147656` | 2:59 | 12 | -3 | 145,678 | Added a duplicate-specific safe tree snapshot and refactored recursive duplication to use safe string fields and child vectors. | accepted |
+| 87 | `run_20260715_095541.log:154379` | 2:31 | 11 | -1 | 142,533 | Made recursive duplication return `DuplicateResult` so exported wrappers handle cleanup of partially built trees. | accepted |
+| 88 | `run_20260715_095541.log:159230` | 5:40 | 10 | -1 | 120,348 | Removed private `add_item_to_object` and moved key allocation, cleanup, and raw linking into exported-wrapper macros. | accepted |
+| 89 | `run_20260715_095541.log:168013` | 11:42 | 6 | -4 | 398,287 | Replaced local float-formatting macros with a safe `sprintf::vsprintf` helper while preserving cJSON's `%g` behavior. | accepted |
+| 90 | `run_20260715_095541.log:188126` | 5:17 | 4 | -2 | 348,251 | Added Rust-owned parsed-string storage and removed hook allocation and raw copying from `parse_string`, with ownership-aware cleanup. | accepted |
+| 91 | `run_20260715_095541.log:202174` | 9:32 | 2 | -2 | 239,179 | Reimplemented `cJSON_strdup` with safe `Vec`/`CString` construction and handed ownership to callers with `CString::into_raw`. | accepted |
+| 92 | `run_20260715_095541.log:220381` | 5:18 | 0 | -2 | 190,665 | Reimplemented `cJSON_New_Item` with fallible Rust allocation and moved reclamation to the exported deletion boundary, reaching zero unsafe operations. | accepted |

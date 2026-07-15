@@ -53,31 +53,14 @@ pub type cJSON_bool = ::core::ffi::c_int;
 pub const CJSON_NESTING_LIMIT: ::core::ffi::c_int = 1000 as ::core::ffi::c_int;
 
 pub const CJSON_CIRCULAR_LIMIT: ::core::ffi::c_int = 10000 as ::core::ffi::c_int;
-pub use crate::__stddef_null_h::NULL;
 pub use crate::__stddef_size_t_h::size_t;
 
 pub use crate::float_h::DBL_EPSILON;
-
 
 pub use crate::internal::__DBL_EPSILON__;
 pub use crate::internal::__INT_MAX__;
 pub use crate::limits_h::INT_MAX;
 pub use crate::limits_h::INT_MIN;
-
-pub use crate::stdlib::lconv;
-pub use crate::stdlib::localeconv;
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -92,124 +75,316 @@ pub struct internal_hooks {
             crate::__stddef_size_t_h::size_t,
         ) -> *mut ::core::ffi::c_void,
     >,
+    pub can_allocate_items: bool,
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
 
 pub struct error {
-    pub json: *const ::core::ffi::c_uchar,
+    pub json: usize,
     pub position: crate::__stddef_size_t_h::size_t,
 }
 #[derive(Copy, Clone)]
 #[repr(C)]
 
-pub struct parse_buffer {
-    pub content: *const ::core::ffi::c_uchar,
+pub struct parse_buffer<'a> {
+    pub content: &'a [::core::ffi::c_uchar],
     pub length: crate::__stddef_size_t_h::size_t,
     pub offset: crate::__stddef_size_t_h::size_t,
     pub depth: crate::__stddef_size_t_h::size_t,
     pub hooks: internal_hooks,
 }
-#[derive(Copy, Clone)]
-#[repr(C)]
+pub enum printbuffer_storage<'a> {
+    Owned(Vec<::core::ffi::c_uchar>),
+    Borrowed(&'a mut [::core::ffi::c_uchar]),
+}
 
-pub struct printbuffer {
-    pub buffer: *mut ::core::ffi::c_uchar,
+pub struct printbuffer<'a> {
+    pub storage: printbuffer_storage<'a>,
     pub length: crate::__stddef_size_t_h::size_t,
     pub offset: crate::__stddef_size_t_h::size_t,
     pub depth: crate::__stddef_size_t_h::size_t,
     pub noalloc: crate::src::cJSON::cJSON_bool,
     pub format: crate::src::cJSON::cJSON_bool,
-    pub hooks: internal_hooks,
+}
+
+struct printable_cjson<'a> {
+    type_0: ::core::ffi::c_int,
+    valuestring: Option<&'a ::std::ffi::CStr>,
+    valueint: ::core::ffi::c_int,
+    valuedouble: ::core::ffi::c_double,
+    string: Option<&'a ::std::ffi::CStr>,
+    children: Vec<printable_cjson<'a>>,
+}
+
+impl<'a> printbuffer<'a> {
+    fn owned(
+        length: crate::__stddef_size_t_h::size_t,
+        format: crate::src::cJSON::cJSON_bool,
+    ) -> Option<Self> {
+        let length = usize::try_from(length).ok()?;
+        let mut storage = Vec::new();
+        storage.try_reserve_exact(length).ok()?;
+        storage.resize(length, 0);
+        Some(Self {
+            storage: printbuffer_storage::Owned(storage),
+            length: length as crate::__stddef_size_t_h::size_t,
+            offset: 0,
+            depth: 0,
+            noalloc: false_0,
+            format,
+        })
+    }
+
+    fn borrowed(
+        storage: &'a mut [::core::ffi::c_uchar],
+        format: crate::src::cJSON::cJSON_bool,
+    ) -> Self {
+        Self {
+            length: storage.len() as crate::__stddef_size_t_h::size_t,
+            storage: printbuffer_storage::Borrowed(storage),
+            offset: 0,
+            depth: 0,
+            noalloc: true_0,
+            format,
+        }
+    }
+
+    fn bytes(&self) -> &[::core::ffi::c_uchar] {
+        match &self.storage {
+            printbuffer_storage::Owned(storage) => storage.as_slice(),
+            printbuffer_storage::Borrowed(storage) => storage,
+        }
+    }
+
+    fn output_slice(
+        &mut self,
+        requested: crate::__stddef_size_t_h::size_t,
+    ) -> Option<&mut [::core::ffi::c_uchar]> {
+        let start = usize::try_from(self.offset).ok()?;
+        let requested = usize::try_from(requested).ok()?;
+        let end = start.checked_add(requested)?;
+        match &mut self.storage {
+            printbuffer_storage::Owned(storage) => storage.get_mut(start..end),
+            printbuffer_storage::Borrowed(storage) => storage.get_mut(start..end),
+        }
+    }
+}
+
+fn printable_child_at_path_mut<'a, 'b>(
+    mut item: &'a mut printable_cjson<'b>,
+    path: &[usize],
+) -> Option<&'a mut printable_cjson<'b>> {
+    for &index in path {
+        item = item.children.get_mut(index)?;
+    }
+    Some(item)
 }
 
 pub const true_0: crate::src::cJSON::cJSON_bool = 1 as ::core::ffi::c_int;
 
 pub const false_0: crate::src::cJSON::cJSON_bool = 0 as ::core::ffi::c_int;
 
-static mut global_error: error = error {
-    json: ::core::ptr::null::<::core::ffi::c_uchar>(),
+fn empty_cjson() -> crate::src::cJSON::cJSON {
+    crate::src::cJSON::cJSON {
+        next: ::core::ptr::null_mut::<crate::src::cJSON::cJSON>(),
+        prev: ::core::ptr::null_mut::<crate::src::cJSON::cJSON>(),
+        child: ::core::ptr::null_mut::<crate::src::cJSON::cJSON>(),
+        type_0: crate::src::cJSON::cJSON_Invalid,
+        valuestring: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+        valueint: 0,
+        valuedouble: 0.0,
+        string: ::core::ptr::null_mut::<::core::ffi::c_char>(),
+    }
+}
+
+static GLOBAL_ERROR: ::std::sync::Mutex<error> = ::std::sync::Mutex::new(error {
+    json: 0,
     position: 0 as crate::__stddef_size_t_h::size_t,
-};
-pub unsafe extern "C" fn cJSON_GetErrorPtr() -> *const ::core::ffi::c_char {
-    return global_error.json.offset(global_error.position as isize) as *const ::core::ffi::c_char;
+});
+
+static RUST_OWNED_C_STRINGS: ::std::sync::LazyLock<
+    ::std::sync::Mutex<::std::collections::HashMap<usize, Vec<::core::ffi::c_uchar>>>,
+> = ::std::sync::LazyLock::new(|| ::std::sync::Mutex::new(::std::collections::HashMap::new()));
+
+fn global_error() -> ::std::sync::MutexGuard<'static, error> {
+    GLOBAL_ERROR
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn reset_global_error() {
+    *global_error() = error {
+        json: 0,
+        position: 0 as crate::__stddef_size_t_h::size_t,
+    };
+}
+
+fn set_global_error(error: error) {
+    *global_error() = error;
+}
+
+fn rust_owned_c_strings(
+) -> ::std::sync::MutexGuard<'static, ::std::collections::HashMap<usize, Vec<::core::ffi::c_uchar>>>
+{
+    RUST_OWNED_C_STRINGS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn unregister_owned_c_string(address: usize) -> bool {
+    if address == 0 {
+        return false;
+    }
+    rust_owned_c_strings().remove(&address).is_some()
+}
+
+pub fn cJSON_GetErrorPtr() -> Option<usize> {
+    let error = global_error();
+    if error.json == 0 {
+        return None;
+    }
+    return Some(error.json.wrapping_add(error.position));
 }
 #[export_name = "cJSON_GetErrorPtr"]
 
 pub unsafe extern "C" fn cJSON_GetErrorPtr_ffi() -> *const ::core::ffi::c_char {
-    cJSON_GetErrorPtr()
-}
-pub unsafe extern "C" fn cJSON_GetStringValue(
-    item: *const crate::src::cJSON::cJSON,
-) -> *mut ::core::ffi::c_char {
-    if cJSON_IsString(item) == 0 {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    match cJSON_GetErrorPtr() {
+        Some(error_ptr) => error_ptr as *const ::core::ffi::c_char,
+        None => ::core::ptr::null(),
     }
-    return (*item).valuestring;
 }
 #[export_name = "cJSON_GetStringValue"]
 
 pub unsafe extern "C" fn cJSON_GetStringValue_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> *mut ::core::ffi::c_char {
-    cJSON_GetStringValue(item)
+    let item = unsafe { item.as_ref() };
+    if cJSON_IsString(item) == 0 {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    }
+    item.expect("cJSON_IsString rejects null items").valuestring
 }
-pub unsafe extern "C" fn cJSON_GetNumberValue(
-    item: *const crate::src::cJSON::cJSON,
-) -> ::core::ffi::c_double {
+pub fn cJSON_GetNumberValue(item: Option<&crate::src::cJSON::cJSON>) -> ::core::ffi::c_double {
     if cJSON_IsNumber(item) == 0 {
         return 0.0f64 / 0.0f64;
     }
-    return (*item).valuedouble;
+    return item.expect("cJSON_IsNumber rejects null items").valuedouble;
 }
 #[export_name = "cJSON_GetNumberValue"]
 
 pub unsafe extern "C" fn cJSON_GetNumberValue_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> ::core::ffi::c_double {
-    cJSON_GetNumberValue(item)
+    cJSON_GetNumberValue(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_Version() -> *const ::core::ffi::c_char {
-    static mut version: [::core::ffi::c_char; 15] = [0; 15];
-    crate::stdlib::sprintf(
-        &raw mut version as *mut ::core::ffi::c_char,
-        b"%i.%i.%i\0".as_ptr() as *const ::core::ffi::c_char,
-        crate::src::cJSON::CJSON_VERSION_MAJOR,
-        crate::src::cJSON::CJSON_VERSION_MINOR,
-        crate::src::cJSON::CJSON_VERSION_PATCH,
-    );
-    return &raw mut version as *mut ::core::ffi::c_char;
+pub fn cJSON_Version() -> &'static [::core::ffi::c_char; 7] {
+    static VERSION: [::core::ffi::c_char; 7] = [
+        b'1' as ::core::ffi::c_char,
+        b'.' as ::core::ffi::c_char,
+        b'7' as ::core::ffi::c_char,
+        b'.' as ::core::ffi::c_char,
+        b'1' as ::core::ffi::c_char,
+        b'9' as ::core::ffi::c_char,
+        0,
+    ];
+    return &VERSION;
 }
 #[export_name = "cJSON_Version"]
 
 pub unsafe extern "C" fn cJSON_Version_ffi() -> *const ::core::ffi::c_char {
-    cJSON_Version()
+    cJSON_Version().as_ptr()
 }
-unsafe extern "C" fn case_insensitive_strcmp(
-    mut string1: *const ::core::ffi::c_uchar,
-    mut string2: *const ::core::ffi::c_uchar,
+fn case_insensitive_strcmp(
+    string1: Option<&::std::ffi::CStr>,
+    string2: Option<&::std::ffi::CStr>,
 ) -> ::core::ffi::c_int {
-    if string1.is_null() || string2.is_null() {
+    let (Some(string1), Some(string2)) = (string1, string2) else {
         return 1 as ::core::ffi::c_int;
-    }
-    if string1 == string2 {
+    };
+    if string1.as_ptr() == string2.as_ptr() {
         return 0 as ::core::ffi::c_int;
     }
-    while crate::stdlib::tolower(*string1 as ::core::ffi::c_int)
-        == crate::stdlib::tolower(*string2 as ::core::ffi::c_int)
+    for (&byte1, &byte2) in string1
+        .to_bytes_with_nul()
+        .iter()
+        .zip(string2.to_bytes_with_nul().iter())
     {
-        if *string1 as ::core::ffi::c_int == '\0' as i32 {
+        let lower1 = byte1.to_ascii_lowercase();
+        let lower2 = byte2.to_ascii_lowercase();
+        if lower1 != lower2 {
+            return lower1 as ::core::ffi::c_int - lower2 as ::core::ffi::c_int;
+        }
+        if byte1 as ::core::ffi::c_int == '\0' as i32 {
             return 0 as ::core::ffi::c_int;
         }
-        string1 = string1.offset(1);
-        string2 = string2.offset(1);
     }
-    return crate::stdlib::tolower(*string1 as ::core::ffi::c_int)
-        - crate::stdlib::tolower(*string2 as ::core::ffi::c_int);
+    return 0 as ::core::ffi::c_int;
 }
 
-static mut global_hooks: internal_hooks = unsafe {
-    internal_hooks {
+static global_hooks: ::std::sync::Mutex<internal_hooks> = ::std::sync::Mutex::new(internal_hooks {
+    allocate: Some(
+        crate::stdlib::malloc
+            as unsafe extern "C" fn(crate::__stddef_size_t_h::size_t) -> *mut ::core::ffi::c_void,
+    ),
+    deallocate: Some(crate::stdlib::free as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()),
+    reallocate: Some(
+        crate::stdlib::realloc
+            as unsafe extern "C" fn(
+                *mut ::core::ffi::c_void,
+                crate::__stddef_size_t_h::size_t,
+            ) -> *mut ::core::ffi::c_void,
+    ),
+    can_allocate_items: true,
+});
+
+fn global_hooks_lock() -> ::std::sync::MutexGuard<'static, internal_hooks> {
+    global_hooks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn global_hooks_snapshot() -> internal_hooks {
+    *global_hooks_lock()
+}
+
+fn set_global_hooks(hooks: internal_hooks) {
+    *global_hooks_lock() = hooks;
+}
+
+fn cJSON_strdup(string: Option<&::std::ffi::CStr>) -> Option<::std::ffi::CString> {
+    let string = string?;
+    let bytes = string.to_bytes();
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(bytes.len()).ok()?;
+    copy.extend_from_slice(bytes);
+    ::std::ffi::CString::new(copy).ok()
+}
+pub fn cJSON_InitHooks(hooks: Option<&crate::src::cJSON::cJSON_Hooks>) {
+    let Some(hooks) = hooks else {
+        set_global_hooks(internal_hooks {
+            allocate: Some(
+                crate::stdlib::malloc
+                    as unsafe extern "C" fn(
+                        crate::__stddef_size_t_h::size_t,
+                    ) -> *mut ::core::ffi::c_void,
+            ),
+            deallocate: Some(
+                crate::stdlib::free as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> (),
+            ),
+            reallocate: Some(
+                crate::stdlib::realloc
+                    as unsafe extern "C" fn(
+                        *mut ::core::ffi::c_void,
+                        crate::__stddef_size_t_h::size_t,
+                    ) -> *mut ::core::ffi::c_void,
+            ),
+            can_allocate_items: true,
+        });
+        return;
+    };
+
+    let mut new_hooks = internal_hooks {
         allocate: Some(
             crate::stdlib::malloc
                 as unsafe extern "C" fn(
@@ -219,284 +394,159 @@ static mut global_hooks: internal_hooks = unsafe {
         deallocate: Some(
             crate::stdlib::free as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> (),
         ),
-        reallocate: Some(
-            crate::stdlib::realloc
-                as unsafe extern "C" fn(
-                    *mut ::core::ffi::c_void,
-                    crate::__stddef_size_t_h::size_t,
-                ) -> *mut ::core::ffi::c_void,
-        ),
+        reallocate: None,
+        can_allocate_items: true,
+    };
+    if hooks.malloc_fn.is_some() {
+        new_hooks.allocate = hooks.malloc_fn;
+        new_hooks.can_allocate_items = false;
     }
-};
-
-unsafe extern "C" fn cJSON_strdup(
-    mut string: *const ::core::ffi::c_uchar,
-    hooks: *const internal_hooks,
-) -> *mut ::core::ffi::c_uchar {
-    let mut length: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
-    let mut copy: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if string.is_null() {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    if hooks.free_fn.is_some() {
+        new_hooks.deallocate = hooks.free_fn;
     }
-    length =
-        crate::stdlib::strlen(string as *const ::core::ffi::c_char)
-            .wrapping_add(::core::mem::size_of::<[::core::ffi::c_char; 1]>()
-                as crate::__stddef_size_t_h::size_t);
-    copy =
-        (*hooks).allocate.expect("non-null function pointer")(length) as *mut ::core::ffi::c_uchar;
-    if copy.is_null() {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    }
-    crate::stdlib::memcpy(
-        copy as *mut ::core::ffi::c_void,
-        string as *const ::core::ffi::c_void,
-        length,
-    );
-    return copy;
-}
-pub unsafe extern "C" fn cJSON_InitHooks(mut hooks: *mut crate::src::cJSON::cJSON_Hooks) {
-    if hooks.is_null() {
-        global_hooks.allocate = Some(
-            crate::stdlib::malloc
-                as unsafe extern "C" fn(
-                    crate::__stddef_size_t_h::size_t,
-                ) -> *mut ::core::ffi::c_void,
-        )
-            as Option<
-                unsafe extern "C" fn(crate::__stddef_size_t_h::size_t) -> *mut ::core::ffi::c_void,
-            >;
-        global_hooks.deallocate =
-            Some(crate::stdlib::free as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ())
-                as Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()>;
-        global_hooks.reallocate = Some(
-            crate::stdlib::realloc
-                as unsafe extern "C" fn(
-                    *mut ::core::ffi::c_void,
-                    crate::__stddef_size_t_h::size_t,
-                ) -> *mut ::core::ffi::c_void,
-        )
-            as Option<
-                unsafe extern "C" fn(
-                    *mut ::core::ffi::c_void,
-                    crate::__stddef_size_t_h::size_t,
-                ) -> *mut ::core::ffi::c_void,
-            >;
-        return;
-    }
-    global_hooks.allocate = Some(
-        crate::stdlib::malloc
-            as unsafe extern "C" fn(crate::__stddef_size_t_h::size_t) -> *mut ::core::ffi::c_void,
-    )
-        as Option<
-            unsafe extern "C" fn(crate::__stddef_size_t_h::size_t) -> *mut ::core::ffi::c_void,
-        >;
-    if (*hooks).malloc_fn.is_some() {
-        global_hooks.allocate = (*hooks).malloc_fn;
-    }
-    global_hooks.deallocate =
-        Some(crate::stdlib::free as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ())
-            as Option<unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ()>;
-    if (*hooks).free_fn.is_some() {
-        global_hooks.deallocate = (*hooks).free_fn;
-    }
-    global_hooks.reallocate = None;
-    if global_hooks.allocate
+    if new_hooks.allocate
         == Some(
             crate::stdlib::malloc
                 as unsafe extern "C" fn(
                     crate::__stddef_size_t_h::size_t,
                 ) -> *mut ::core::ffi::c_void,
         )
-        && global_hooks.deallocate
+        && new_hooks.deallocate
             == Some(crate::stdlib::free as unsafe extern "C" fn(*mut ::core::ffi::c_void) -> ())
     {
-        global_hooks.reallocate = Some(
+        new_hooks.reallocate = Some(
             crate::stdlib::realloc
                 as unsafe extern "C" fn(
                     *mut ::core::ffi::c_void,
                     crate::__stddef_size_t_h::size_t,
                 ) -> *mut ::core::ffi::c_void,
-        )
-            as Option<
-                unsafe extern "C" fn(
-                    *mut ::core::ffi::c_void,
-                    crate::__stddef_size_t_h::size_t,
-                ) -> *mut ::core::ffi::c_void,
-            >;
+        );
     }
+    set_global_hooks(new_hooks);
 }
 #[export_name = "cJSON_InitHooks"]
 
 pub unsafe extern "C" fn cJSON_InitHooks_ffi(mut hooks: *mut crate::src::cJSON::cJSON_Hooks) {
-    cJSON_InitHooks(hooks)
+    cJSON_InitHooks(unsafe { hooks.as_ref() })
 }
-unsafe extern "C" fn cJSON_New_Item(hooks: *const internal_hooks) -> *mut crate::src::cJSON::cJSON {
-    let mut node: *mut crate::src::cJSON::cJSON = (*hooks)
-        .allocate
-        .expect("non-null function pointer")(
-        ::core::mem::size_of::<crate::src::cJSON::cJSON>() as crate::__stddef_size_t_h::size_t,
-    ) as *mut crate::src::cJSON::cJSON;
-    if !node.is_null() {
-        crate::stdlib::memset(
-            node as *mut ::core::ffi::c_void,
-            '\0' as i32,
-            ::core::mem::size_of::<crate::src::cJSON::cJSON>() as crate::__stddef_size_t_h::size_t,
-        );
+fn cJSON_New_Item(hooks: &internal_hooks) -> Option<&'static mut crate::src::cJSON::cJSON> {
+    if !hooks.can_allocate_items {
+        return None;
     }
-    return node;
+    let mut allocation = Vec::new();
+    allocation.try_reserve_exact(1).ok()?;
+    allocation.push(empty_cjson());
+    Box::leak(allocation.into_boxed_slice()).first_mut()
 }
-pub unsafe extern "C" fn cJSON_Delete(mut item: *mut crate::src::cJSON::cJSON) {
+
+#[export_name = "cJSON_Delete"]
+
+pub unsafe extern "C" fn cJSON_Delete_ffi(mut item: *mut crate::src::cJSON::cJSON) {
     let mut next: *mut crate::src::cJSON::cJSON =
         ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     while !item.is_null() {
         next = (*item).next as *mut crate::src::cJSON::cJSON;
         if (*item).type_0 & crate::src::cJSON::cJSON_IsReference == 0 && !(*item).child.is_null() {
-            cJSON_Delete((*item).child as *mut crate::src::cJSON::cJSON);
+            cJSON_Delete_ffi((*item).child as *mut crate::src::cJSON::cJSON);
         }
         if (*item).type_0 & crate::src::cJSON::cJSON_IsReference == 0
             && !(*item).valuestring.is_null()
         {
-            global_hooks.deallocate.expect("non-null function pointer")(
-                (*item).valuestring as *mut ::core::ffi::c_void,
-            );
+            let valuestring_address = (*item).valuestring as usize;
+            if !unregister_owned_c_string(valuestring_address) {
+                global_hooks_snapshot()
+                    .deallocate
+                    .expect("non-null function pointer")(
+                    (*item).valuestring as *mut ::core::ffi::c_void,
+                );
+            }
             (*item).valuestring = ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
         if (*item).type_0 & crate::src::cJSON::cJSON_StringIsConst == 0 && !(*item).string.is_null()
         {
-            global_hooks.deallocate.expect("non-null function pointer")(
-                (*item).string as *mut ::core::ffi::c_void,
-            );
+            let string_address = (*item).string as usize;
+            if !unregister_owned_c_string(string_address) {
+                global_hooks_snapshot()
+                    .deallocate
+                    .expect("non-null function pointer")(
+                    (*item).string as *mut ::core::ffi::c_void,
+                );
+            }
             (*item).string = ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
-        global_hooks.deallocate.expect("non-null function pointer")(
-            item as *mut ::core::ffi::c_void,
-        );
+        drop(unsafe { Box::from_raw(::core::ptr::slice_from_raw_parts_mut(item, 1)) });
         item = next;
     }
 }
-#[export_name = "cJSON_Delete"]
-
-pub unsafe extern "C" fn cJSON_Delete_ffi(mut item: *mut crate::src::cJSON::cJSON) {
-    cJSON_Delete(item)
-}
-unsafe extern "C" fn get_decimal_point() -> ::core::ffi::c_uchar {
-    let mut lconv: *mut crate::stdlib::lconv = crate::stdlib::localeconv();
-    return *(*lconv)
-        .decimal_point
-        .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_uchar;
-}
-
-unsafe extern "C" fn parse_number(
-    item: *mut crate::src::cJSON::cJSON,
-    input_buffer: *mut parse_buffer,
+fn parse_number(
+    item: &mut crate::src::cJSON::cJSON,
+    input_buffer: &mut parse_buffer<'_>,
+    content: &[::core::ffi::c_uchar],
 ) -> crate::src::cJSON::cJSON_bool {
-    let mut number: ::core::ffi::c_double = 0 as ::core::ffi::c_int as ::core::ffi::c_double;
-    let mut after_end: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut number_c_string: *mut ::core::ffi::c_uchar =
-        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut decimal_point: ::core::ffi::c_uchar = get_decimal_point();
-    let mut i: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
-    let mut number_string_length: crate::__stddef_size_t_h::size_t =
-        0 as crate::__stddef_size_t_h::size_t;
-    let mut has_decimal_point: crate::src::cJSON::cJSON_bool = false_0;
-    if input_buffer.is_null() || (*input_buffer).content.is_null() {
+    let Some(remaining) = content.get(input_buffer.offset as usize..) else {
         return false_0;
-    }
-    i = 0 as crate::__stddef_size_t_h::size_t;
-    while !input_buffer.is_null() && (*input_buffer).offset.wrapping_add(i) < (*input_buffer).length
-    {
-        match *(*input_buffer)
-            .content
-            .offset((*input_buffer).offset as isize)
-            .offset(i as isize) as ::core::ffi::c_int
-        {
+    };
+    let mut number_string_length: usize = 0;
+    for byte in remaining {
+        match *byte as ::core::ffi::c_int {
             48 | 49 | 50 | 51 | 52 | 53 | 54 | 55 | 56 | 57 | 43 | 45 | 101 | 69 => {
                 number_string_length = number_string_length.wrapping_add(1);
             }
             46 => {
                 number_string_length = number_string_length.wrapping_add(1);
-                has_decimal_point = true_0;
             }
             _ => {
                 break;
             }
         }
-        i = i.wrapping_add(1);
     }
-    number_c_string = (*input_buffer)
-        .hooks
-        .allocate
-        .expect("non-null function pointer")(
-        number_string_length.wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-    ) as *mut ::core::ffi::c_uchar;
-    if number_c_string.is_null() {
-        return false_0;
-    }
-    crate::stdlib::memcpy(
-        number_c_string as *mut ::core::ffi::c_void,
-        (*input_buffer)
-            .content
-            .offset((*input_buffer).offset as isize) as *const ::core::ffi::c_void,
-        number_string_length,
-    );
-    *number_c_string.offset(number_string_length as isize) = '\0' as i32 as ::core::ffi::c_uchar;
-    if has_decimal_point != 0 {
-        i = 0 as crate::__stddef_size_t_h::size_t;
-        while i < number_string_length {
-            if *number_c_string.offset(i as isize) as ::core::ffi::c_int == '.' as i32 {
-                *number_c_string.offset(i as isize) = decimal_point;
-            }
-            i = i.wrapping_add(1);
+
+    let source_number = &remaining[..number_string_length];
+    let mut parsed_number: Option<(::core::ffi::c_double, usize)> = None;
+    for end in (1..=source_number.len()).rev() {
+        let Ok(number_text) = ::core::str::from_utf8(&source_number[..end]) else {
+            continue;
+        };
+        if let Ok(number) = number_text.parse::<::core::ffi::c_double>() {
+            parsed_number = Some((number, end));
+            break;
         }
     }
-    number = crate::stdlib::strtod(
-        number_c_string as *const ::core::ffi::c_char,
-        &raw mut after_end as *mut *mut ::core::ffi::c_char,
-    );
-    if number_c_string == after_end {
-        (*input_buffer)
-            .hooks
-            .deallocate
-            .expect("non-null function pointer")(
-            number_c_string as *mut ::core::ffi::c_void
-        );
+    let Some((number, parsed_length)) = parsed_number else {
         return false_0;
-    }
-    (*item).valuedouble = number;
+    };
+
+    item.valuedouble = number;
     if number >= crate::limits_h::INT_MAX as ::core::ffi::c_double {
-        (*item).valueint = crate::limits_h::INT_MAX;
+        item.valueint = crate::limits_h::INT_MAX;
     } else if number <= crate::limits_h::INT_MIN as ::core::ffi::c_double {
-        (*item).valueint = crate::limits_h::INT_MIN;
+        item.valueint = crate::limits_h::INT_MIN;
     } else {
-        (*item).valueint = number as ::core::ffi::c_int;
+        item.valueint = number as ::core::ffi::c_int;
     }
-    (*item).type_0 = crate::src::cJSON::cJSON_Number;
-    (*input_buffer).offset =
-        (*input_buffer)
-            .offset
-            .wrapping_add(
-                after_end.offset_from(number_c_string) as ::core::ffi::c_long
-                    as crate::__stddef_size_t_h::size_t,
-            );
-    (*input_buffer)
-        .hooks
-        .deallocate
-        .expect("non-null function pointer")(number_c_string as *mut ::core::ffi::c_void);
+    item.type_0 = crate::src::cJSON::cJSON_Number;
+    input_buffer.offset = input_buffer
+        .offset
+        .wrapping_add(parsed_length as crate::__stddef_size_t_h::size_t);
     return true_0;
 }
-pub unsafe extern "C" fn cJSON_SetNumberHelper(
-    mut object: *mut crate::src::cJSON::cJSON,
+pub fn cJSON_SetNumberHelper(
+    object: Option<&mut crate::src::cJSON::cJSON>,
     mut number: ::core::ffi::c_double,
 ) -> ::core::ffi::c_double {
+    let Some(object) = object else {
+        return 0.0f64 / 0.0f64;
+    };
+
     if number >= crate::limits_h::INT_MAX as ::core::ffi::c_double {
-        (*object).valueint = crate::limits_h::INT_MAX;
+        object.valueint = crate::limits_h::INT_MAX;
     } else if number <= crate::limits_h::INT_MIN as ::core::ffi::c_double {
-        (*object).valueint = crate::limits_h::INT_MIN;
+        object.valueint = crate::limits_h::INT_MIN;
     } else {
-        (*object).valueint = number as ::core::ffi::c_int;
+        object.valueint = number as ::core::ffi::c_int;
     }
-    (*object).valuedouble = number;
-    return (*object).valuedouble;
+    object.valuedouble = number;
+    return object.valuedouble;
 }
 #[export_name = "cJSON_SetNumberHelper"]
 
@@ -504,9 +554,11 @@ pub unsafe extern "C" fn cJSON_SetNumberHelper_ffi(
     mut object: *mut crate::src::cJSON::cJSON,
     mut number: ::core::ffi::c_double,
 ) -> ::core::ffi::c_double {
-    cJSON_SetNumberHelper(object, number)
+    cJSON_SetNumberHelper(unsafe { object.as_mut() }, number)
 }
-pub unsafe extern "C" fn cJSON_SetValuestring(
+#[export_name = "cJSON_SetValuestring"]
+
+pub unsafe extern "C" fn cJSON_SetValuestring_ffi(
     mut object: *mut crate::src::cJSON::cJSON,
     mut valuestring: *const ::core::ffi::c_char,
 ) -> *mut ::core::ffi::c_char {
@@ -522,8 +574,10 @@ pub unsafe extern "C" fn cJSON_SetValuestring(
     if (*object).valuestring.is_null() || valuestring.is_null() {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    v1_len = crate::stdlib::strlen(valuestring);
-    v2_len = crate::stdlib::strlen((*object).valuestring);
+    let new_value = ::std::ffi::CStr::from_ptr(valuestring);
+    let old_value = ::std::ffi::CStr::from_ptr((*object).valuestring);
+    v1_len = new_value.to_bytes().len();
+    v2_len = old_value.to_bytes().len();
     if v1_len <= v2_len {
         if !(valuestring.offset(v1_len as isize)
             < (*object).valuestring as *const ::core::ffi::c_char
@@ -532,54 +586,55 @@ pub unsafe extern "C" fn cJSON_SetValuestring(
         {
             return ::core::ptr::null_mut::<::core::ffi::c_char>();
         }
-        crate::stdlib::strcpy((*object).valuestring, valuestring);
+        let source = new_value.to_bytes_with_nul();
+        let destination = ::core::slice::from_raw_parts_mut(
+            (*object).valuestring as *mut ::core::ffi::c_uchar,
+            source.len(),
+        );
+        destination.copy_from_slice(source);
         return (*object).valuestring;
     }
-    copy = cJSON_strdup(
-        valuestring as *const ::core::ffi::c_uchar,
-        &raw mut global_hooks,
-    ) as *mut ::core::ffi::c_char;
+    copy = match cJSON_strdup(Some(new_value)) {
+        Some(copy) => copy.into_raw(),
+        None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+    };
     if copy.is_null() {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
     if !(*object).valuestring.is_null() {
-        cJSON_free((*object).valuestring as *mut ::core::ffi::c_void);
+        let old_valuestring_address = (*object).valuestring as usize;
+        if !unregister_owned_c_string(old_valuestring_address) {
+            global_hooks_snapshot()
+                .deallocate
+                .expect("non-null function pointer")(
+                (*object).valuestring as *mut ::core::ffi::c_void,
+            );
+        }
     }
     (*object).valuestring = copy;
     return copy;
 }
-#[export_name = "cJSON_SetValuestring"]
-
-pub unsafe extern "C" fn cJSON_SetValuestring_ffi(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut valuestring: *const ::core::ffi::c_char,
-) -> *mut ::core::ffi::c_char {
-    cJSON_SetValuestring(object, valuestring)
-}
-unsafe extern "C" fn ensure(
-    p: *mut printbuffer,
+fn ensure<'p>(
+    p: Option<&'p mut printbuffer<'_>>,
     mut needed: crate::__stddef_size_t_h::size_t,
-) -> *mut ::core::ffi::c_uchar {
-    let mut newbuffer: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+) -> Option<&'p mut [::core::ffi::c_uchar]> {
+    let Some(p) = p else {
+        return None;
+    };
     let mut newsize: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
-    if p.is_null() || (*p).buffer.is_null() {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    }
-    if (*p).length > 0 as crate::__stddef_size_t_h::size_t && (*p).offset >= (*p).length {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    if p.length > 0 as crate::__stddef_size_t_h::size_t && p.offset >= p.length {
+        return None;
     }
     if needed > crate::limits_h::INT_MAX as crate::__stddef_size_t_h::size_t {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+        return None;
     }
-    needed = needed.wrapping_add(
-        (*p).offset
-            .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-    );
-    if needed <= (*p).length {
-        return (*p).buffer.offset((*p).offset as isize);
+    let requested = needed;
+    needed = needed.checked_add(p.offset.wrapping_add(1 as crate::__stddef_size_t_h::size_t))?;
+    if needed <= p.length {
+        return p.output_slice(requested);
     }
-    if (*p).noalloc != 0 {
-        return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+    if p.noalloc != 0 {
+        return None;
     }
     if needed
         > (crate::limits_h::INT_MAX / 2 as ::core::ffi::c_int) as crate::__stddef_size_t_h::size_t
@@ -587,730 +642,859 @@ unsafe extern "C" fn ensure(
         if needed <= crate::limits_h::INT_MAX as crate::__stddef_size_t_h::size_t {
             newsize = crate::limits_h::INT_MAX as crate::__stddef_size_t_h::size_t;
         } else {
-            return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
+            return None;
         }
     } else {
         newsize = needed.wrapping_mul(2 as crate::__stddef_size_t_h::size_t);
     }
-    if (*p).hooks.reallocate.is_some() {
-        newbuffer = (*p).hooks.reallocate.expect("non-null function pointer")(
-            (*p).buffer as *mut ::core::ffi::c_void,
-            newsize,
-        ) as *mut ::core::ffi::c_uchar;
-        if newbuffer.is_null() {
-            (*p).hooks.deallocate.expect("non-null function pointer")(
-                (*p).buffer as *mut ::core::ffi::c_void,
-            );
-            (*p).length = 0 as crate::__stddef_size_t_h::size_t;
-            (*p).buffer = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-            return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-        }
-    } else {
-        newbuffer = (*p).hooks.allocate.expect("non-null function pointer")(newsize)
-            as *mut ::core::ffi::c_uchar;
-        if newbuffer.is_null() {
-            (*p).hooks.deallocate.expect("non-null function pointer")(
-                (*p).buffer as *mut ::core::ffi::c_void,
-            );
-            (*p).length = 0 as crate::__stddef_size_t_h::size_t;
-            (*p).buffer = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-            return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-        }
-        crate::stdlib::memcpy(
-            newbuffer as *mut ::core::ffi::c_void,
-            (*p).buffer as *const ::core::ffi::c_void,
-            (*p).offset
-                .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-        );
-        (*p).hooks.deallocate.expect("non-null function pointer")(
-            (*p).buffer as *mut ::core::ffi::c_void,
-        );
+    let printbuffer_storage::Owned(storage) = &mut p.storage else {
+        return None;
+    };
+    let newsize = usize::try_from(newsize).ok()?;
+    if storage.len() < newsize {
+        storage.try_reserve_exact(newsize - storage.len()).ok()?;
+        storage.resize(newsize, 0);
     }
-    (*p).length = newsize;
-    (*p).buffer = newbuffer;
-    return newbuffer.offset((*p).offset as isize);
+    p.length = newsize;
+    return p.output_slice(requested);
 }
 
-unsafe extern "C" fn update_offset(buffer: *mut printbuffer) {
-    let mut buffer_pointer: *const ::core::ffi::c_uchar =
-        ::core::ptr::null::<::core::ffi::c_uchar>();
-    if buffer.is_null() || (*buffer).buffer.is_null() {
-        return;
-    }
-    buffer_pointer = (*buffer).buffer.offset((*buffer).offset as isize);
-    (*buffer).offset = (*buffer).offset.wrapping_add(crate::stdlib::strlen(
-        buffer_pointer as *const ::core::ffi::c_char,
-    ));
-}
-
-unsafe extern "C" fn compare_double(
+fn compare_double(
     mut a: ::core::ffi::c_double,
     mut b: ::core::ffi::c_double,
 ) -> crate::src::cJSON::cJSON_bool {
-    let mut maxVal: ::core::ffi::c_double = if crate::stdlib::fabs(a) > crate::stdlib::fabs(b) {
-        crate::stdlib::fabs(a)
-    } else {
-        crate::stdlib::fabs(b)
-    };
-    return (crate::stdlib::fabs(a - b) <= maxVal * crate::float_h::DBL_EPSILON)
-        as ::core::ffi::c_int;
+    let mut maxVal: ::core::ffi::c_double = if a.abs() > b.abs() { a.abs() } else { b.abs() };
+    return ((a - b).abs() <= maxVal * crate::float_h::DBL_EPSILON) as ::core::ffi::c_int;
 }
 
-unsafe extern "C" fn print_number(
-    item: *const crate::src::cJSON::cJSON,
-    output_buffer: *mut printbuffer,
-) -> crate::src::cJSON::cJSON_bool {
-    let mut output_pointer: *mut ::core::ffi::c_uchar =
-        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut d: ::core::ffi::c_double = (*item).valuedouble;
-    let mut length: ::core::ffi::c_int = 0 as ::core::ffi::c_int;
-    let mut i: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
-    let mut number_buffer: [::core::ffi::c_uchar; 26] = [
-        0 as ::core::ffi::c_int as ::core::ffi::c_uchar,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-    ];
-    let mut decimal_point: ::core::ffi::c_uchar = get_decimal_point();
-    let mut test: ::core::ffi::c_double = 0.0f64;
-    if output_buffer.is_null() {
-        return false_0;
+fn trim_fraction(number: &mut String) {
+    if !number.contains('.') {
+        return;
     }
-    if d != d || d - d != d - d && !(d != d) {
-        length = crate::stdlib::sprintf(
-            &raw mut number_buffer as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_char,
-            b"null\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-    } else if d == (*item).valueint as ::core::ffi::c_double {
-        length = crate::stdlib::sprintf(
-            &raw mut number_buffer as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_char,
-            b"%d\0".as_ptr() as *const ::core::ffi::c_char,
-            (*item).valueint,
-        );
+    while number.ends_with('0') {
+        number.pop();
+    }
+    if number.ends_with('.') {
+        number.pop();
+    }
+}
+
+fn c_style_exponent(exponent: ::core::ffi::c_int) -> String {
+    let mut output = String::new();
+    output.push('e');
+    let magnitude = if exponent < 0 {
+        output.push('-');
+        exponent.unsigned_abs()
     } else {
-        length = crate::stdlib::sprintf(
-            &raw mut number_buffer as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_char,
-            b"%1.15g\0".as_ptr() as *const ::core::ffi::c_char,
-            d,
-        );
-        if crate::stdlib::sscanf(
-            &raw mut number_buffer as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_char,
-            b"%lg\0".as_ptr() as *const ::core::ffi::c_char,
-            &raw mut test,
-        ) != 1 as ::core::ffi::c_int
-            || compare_double(test, d) == 0
+        output.push('+');
+        exponent as ::core::ffi::c_uint
+    };
+    if magnitude < 10 {
+        output.push('0');
+    }
+
+    let mut digits = [0u8; 10];
+    let mut digit_count = 0usize;
+    let mut remaining = magnitude;
+    loop {
+        digits[digit_count] = b'0'.wrapping_add((remaining % 10) as u8);
+        digit_count = digit_count.wrapping_add(1);
+        remaining /= 10;
+        if remaining == 0 {
+            break;
+        }
+    }
+    while digit_count > 0 {
+        digit_count = digit_count.wrapping_sub(1);
+        output.push(char::from(digits[digit_count]));
+    }
+
+    output
+}
+
+enum DoubleStyle {
+    Normal,
+    Scientific,
+}
+
+fn format_double(
+    value: ::core::ffi::c_double,
+    precision: ::core::ffi::c_int,
+    style: DoubleStyle,
+) -> Option<String> {
+    let precision = ::core::ffi::c_uint::try_from(precision).ok()?;
+    let mut format = String::from("%.");
+    let mut digits = [0u8; 10];
+    let mut digit_count = 0usize;
+    let mut remaining = precision;
+    loop {
+        digits[digit_count] = b'0'.wrapping_add((remaining % 10) as u8);
+        digit_count = digit_count.wrapping_add(1);
+        remaining /= 10;
+        if remaining == 0 {
+            break;
+        }
+    }
+    while digit_count > 0 {
+        digit_count = digit_count.wrapping_sub(1);
+        format.push(char::from(digits[digit_count]));
+    }
+    match style {
+        DoubleStyle::Normal => format.push('f'),
+        DoubleStyle::Scientific => format.push('e'),
+    }
+    let args: [&dyn sprintf::Printf; 1] = [&value];
+    sprintf::vsprintf(&format, &args).ok()
+}
+
+fn format_g_scientific(scientific: &str, negative: bool, exponent: ::core::ffi::c_int) -> String {
+    let mantissa_end = scientific.find('e').unwrap_or(scientific.len());
+    let mut mantissa = scientific[..mantissa_end].to_string();
+    trim_fraction(&mut mantissa);
+
+    let mut output = String::new();
+    if negative {
+        output.push('-');
+    }
+    output.push_str(&mantissa);
+    output.push_str(&c_style_exponent(exponent));
+    output
+}
+
+fn format_g(value: ::core::ffi::c_double, precision: usize) -> Option<String> {
+    if precision == 0 || !value.is_finite() {
+        return None;
+    }
+
+    let negative = value.is_sign_negative();
+    let value = value.abs();
+    if value == 0.0 {
+        Some("0".to_string())
+    } else {
+        let scientific = format_double(
+            value,
+            precision.wrapping_sub(1) as ::core::ffi::c_int,
+            DoubleStyle::Scientific,
+        )?;
+        match scientific
+            .split_once('e')
+            .and_then(|(_, exponent)| exponent.parse::<::core::ffi::c_int>().ok())
         {
-            length = crate::stdlib::sprintf(
-                &raw mut number_buffer as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_char,
-                b"%1.17g\0".as_ptr() as *const ::core::ffi::c_char,
-                d,
-            );
+            Some(exponent) => {
+                if exponent < -4 || exponent >= precision as ::core::ffi::c_int {
+                    Some(format_g_scientific(&scientific, negative, exponent))
+                } else {
+                    let fraction_digits = (precision as ::core::ffi::c_int)
+                        .saturating_sub(exponent.saturating_add(1))
+                        .max(0);
+                    let mut output = format_double(value, fraction_digits, DoubleStyle::Normal)?;
+                    trim_fraction(&mut output);
+                    if negative {
+                        output.insert(0, '-');
+                    }
+                    Some(output)
+                }
+            }
+            None => None,
         }
     }
-    if length < 0 as ::core::ffi::c_int
-        || length
-            > (::core::mem::size_of::<[::core::ffi::c_uchar; 26]>() as usize)
-                .wrapping_sub(1 as usize) as ::core::ffi::c_int
-    {
+}
+
+fn print_number(
+    valueint: ::core::ffi::c_int,
+    valuedouble: ::core::ffi::c_double,
+    output_buffer: Option<&mut printbuffer<'_>>,
+) -> crate::src::cJSON::cJSON_bool {
+    let Some(output_buffer) = output_buffer else {
         return false_0;
-    }
-    output_pointer = ensure(
-        output_buffer,
-        (length as crate::__stddef_size_t_h::size_t)
-            .wrapping_add(::core::mem::size_of::<[::core::ffi::c_char; 1]>()
-                as crate::__stddef_size_t_h::size_t),
-    );
-    if output_pointer.is_null() {
-        return false_0;
-    }
-    i = 0 as crate::__stddef_size_t_h::size_t;
-    while i < length as crate::__stddef_size_t_h::size_t {
-        if number_buffer[i as usize] as ::core::ffi::c_int == decimal_point as ::core::ffi::c_int {
-            *output_pointer.offset(i as isize) = '.' as i32 as ::core::ffi::c_uchar;
+    };
+    let d: ::core::ffi::c_double = valuedouble;
+    let number = if !d.is_finite() {
+        "null".to_string()
+    } else if d == valueint as ::core::ffi::c_double {
+        valueint.to_string()
+    } else {
+        let Some(candidate) = format_g(d, 15) else {
+            return false_0;
+        };
+        if candidate
+            .parse::<::core::ffi::c_double>()
+            .map_or(true, |test| compare_double(test, d) == 0)
+        {
+            let Some(fallback) = format_g(d, 17) else {
+                return false_0;
+            };
+            fallback
         } else {
-            *output_pointer.offset(i as isize) = number_buffer[i as usize];
+            candidate
         }
-        i = i.wrapping_add(1);
+    };
+
+    let length = number.len();
+    if length > 25 {
+        return false_0;
     }
-    *output_pointer.offset(i as isize) = '\0' as i32 as ::core::ffi::c_uchar;
-    (*output_buffer).offset = (*output_buffer)
+    let needed = (length as crate::__stddef_size_t_h::size_t).wrapping_add(1);
+    let Some(output) = ensure(Some(&mut *output_buffer), needed) else {
+        return false_0;
+    };
+    output[..length].copy_from_slice(number.as_bytes());
+    output[length] = b'\0';
+    output_buffer.offset = output_buffer
         .offset
         .wrapping_add(length as crate::__stddef_size_t_h::size_t);
     return true_0;
 }
 
-unsafe extern "C" fn parse_hex4(input: *const ::core::ffi::c_uchar) -> ::core::ffi::c_uint {
+fn parse_hex4(input: &[::core::ffi::c_uchar]) -> ::core::ffi::c_uint {
     let mut h: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
-    let mut i: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
-    i = 0 as crate::__stddef_size_t_h::size_t;
-    while i < 4 as crate::__stddef_size_t_h::size_t {
-        if *input.offset(i as isize) as ::core::ffi::c_int >= '0' as i32
-            && *input.offset(i as isize) as ::core::ffi::c_int <= '9' as i32
-        {
+    let mut i: usize = 0;
+    while i < 4 {
+        let byte = input[i];
+        if byte as ::core::ffi::c_int >= '0' as i32 && byte as ::core::ffi::c_int <= '9' as i32 {
             h = h.wrapping_add(
-                (*input.offset(i as isize) as ::core::ffi::c_uint)
-                    .wrapping_sub('0' as i32 as ::core::ffi::c_uint),
+                (byte as ::core::ffi::c_uint).wrapping_sub('0' as i32 as ::core::ffi::c_uint),
             );
-        } else if *input.offset(i as isize) as ::core::ffi::c_int >= 'A' as i32
-            && *input.offset(i as isize) as ::core::ffi::c_int <= 'F' as i32
+        } else if byte as ::core::ffi::c_int >= 'A' as i32
+            && byte as ::core::ffi::c_int <= 'F' as i32
         {
             h = h.wrapping_add(
                 (10 as ::core::ffi::c_int as ::core::ffi::c_uint)
-                    .wrapping_add(*input.offset(i as isize) as ::core::ffi::c_uint)
+                    .wrapping_add(byte as ::core::ffi::c_uint)
                     .wrapping_sub('A' as i32 as ::core::ffi::c_uint),
             );
-        } else if *input.offset(i as isize) as ::core::ffi::c_int >= 'a' as i32
-            && *input.offset(i as isize) as ::core::ffi::c_int <= 'f' as i32
+        } else if byte as ::core::ffi::c_int >= 'a' as i32
+            && byte as ::core::ffi::c_int <= 'f' as i32
         {
             h = h.wrapping_add(
                 (10 as ::core::ffi::c_int as ::core::ffi::c_uint)
-                    .wrapping_add(*input.offset(i as isize) as ::core::ffi::c_uint)
+                    .wrapping_add(byte as ::core::ffi::c_uint)
                     .wrapping_sub('a' as i32 as ::core::ffi::c_uint),
             );
         } else {
             return 0 as ::core::ffi::c_uint;
         }
-        if i < 3 as crate::__stddef_size_t_h::size_t {
+        if i < 3 {
             h = h << 4 as ::core::ffi::c_int;
         }
-        i = i.wrapping_add(1);
+        i += 1;
     }
     return h;
 }
 
-unsafe extern "C" fn utf16_literal_to_utf8(
-    input_pointer: *const ::core::ffi::c_uchar,
-    input_end: *const ::core::ffi::c_uchar,
-    mut output_pointer: *mut *mut ::core::ffi::c_uchar,
+fn utf16_literal_to_utf8(
+    input: &[::core::ffi::c_uchar],
+    output: &mut Vec<::core::ffi::c_uchar>,
 ) -> ::core::ffi::c_uchar {
-    let mut c2rust_current_block: u64;
-    let mut codepoint: ::core::ffi::c_ulong = 0 as ::core::ffi::c_ulong;
-    let mut first_code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
-    let mut first_sequence: *const ::core::ffi::c_uchar = input_pointer;
-    let mut utf8_length: ::core::ffi::c_uchar = 0 as ::core::ffi::c_uchar;
-    let mut utf8_position: ::core::ffi::c_uchar = 0 as ::core::ffi::c_uchar;
-    let mut sequence_length: ::core::ffi::c_uchar = 0 as ::core::ffi::c_uchar;
-    let mut first_byte_mark: ::core::ffi::c_uchar = 0 as ::core::ffi::c_uchar;
-    if !((input_end.offset_from(first_sequence) as ::core::ffi::c_long) < 6 as ::core::ffi::c_long)
-    {
-        first_code = parse_hex4(first_sequence.offset(2 as ::core::ffi::c_int as isize));
-        if !(first_code >= 0xdc00 as ::core::ffi::c_uint
-            && first_code <= 0xdfff as ::core::ffi::c_uint)
-        {
-            if first_code >= 0xd800 as ::core::ffi::c_uint
-                && first_code <= 0xdbff as ::core::ffi::c_uint
-            {
-                let mut second_sequence: *const ::core::ffi::c_uchar =
-                    first_sequence.offset(6 as ::core::ffi::c_int as isize);
-                let mut second_code: ::core::ffi::c_uint = 0 as ::core::ffi::c_uint;
-                sequence_length = 12 as ::core::ffi::c_uchar;
-                if (input_end.offset_from(second_sequence) as ::core::ffi::c_long)
-                    < 6 as ::core::ffi::c_long
-                {
-                    c2rust_current_block = 2136517548508416331;
-                } else if *second_sequence.offset(0 as ::core::ffi::c_int as isize)
-                    as ::core::ffi::c_int
-                    != '\\' as i32
-                    || *second_sequence.offset(1 as ::core::ffi::c_int as isize)
-                        as ::core::ffi::c_int
-                        != 'u' as i32
-                {
-                    c2rust_current_block = 2136517548508416331;
-                } else {
-                    second_code =
-                        parse_hex4(second_sequence.offset(2 as ::core::ffi::c_int as isize));
-                    if second_code < 0xdc00 as ::core::ffi::c_uint
-                        || second_code > 0xdfff as ::core::ffi::c_uint
-                    {
-                        c2rust_current_block = 2136517548508416331;
-                    } else {
-                        codepoint = (0x10000 as ::core::ffi::c_int as ::core::ffi::c_uint)
-                            .wrapping_add(
-                                (first_code & 0x3ff as ::core::ffi::c_uint)
-                                    << 10 as ::core::ffi::c_int
-                                    | second_code & 0x3ff as ::core::ffi::c_uint,
-                            ) as ::core::ffi::c_ulong;
-                        c2rust_current_block = 12039483399334584727;
-                    }
-                }
-            } else {
-                sequence_length = 6 as ::core::ffi::c_uchar;
-                codepoint = first_code as ::core::ffi::c_ulong;
-                c2rust_current_block = 12039483399334584727;
-            }
-            match c2rust_current_block {
-                2136517548508416331 => {}
-                _ => {
-                    if codepoint < 0x80 as ::core::ffi::c_ulong {
-                        utf8_length = 1 as ::core::ffi::c_uchar;
-                        c2rust_current_block = 3437258052017859086;
-                    } else if codepoint < 0x800 as ::core::ffi::c_ulong {
-                        utf8_length = 2 as ::core::ffi::c_uchar;
-                        first_byte_mark = 0xc0 as ::core::ffi::c_uchar;
-                        c2rust_current_block = 3437258052017859086;
-                    } else if codepoint < 0x10000 as ::core::ffi::c_ulong {
-                        utf8_length = 3 as ::core::ffi::c_uchar;
-                        first_byte_mark = 0xe0 as ::core::ffi::c_uchar;
-                        c2rust_current_block = 3437258052017859086;
-                    } else if codepoint <= 0x10ffff as ::core::ffi::c_ulong {
-                        utf8_length = 4 as ::core::ffi::c_uchar;
-                        first_byte_mark = 0xf0 as ::core::ffi::c_uchar;
-                        c2rust_current_block = 3437258052017859086;
-                    } else {
-                        c2rust_current_block = 2136517548508416331;
-                    }
-                    match c2rust_current_block {
-                        2136517548508416331 => {}
-                        _ => {
-                            utf8_position = (utf8_length as ::core::ffi::c_int
-                                - 1 as ::core::ffi::c_int)
-                                as ::core::ffi::c_uchar;
-                            while utf8_position as ::core::ffi::c_int > 0 as ::core::ffi::c_int {
-                                *(*output_pointer).offset(utf8_position as isize) = ((codepoint
-                                    | 0x80 as ::core::ffi::c_ulong)
-                                    & 0xbf as ::core::ffi::c_ulong)
-                                    as ::core::ffi::c_uchar;
-                                codepoint >>= 6 as ::core::ffi::c_int;
-                                utf8_position = utf8_position.wrapping_sub(1);
-                            }
-                            if utf8_length as ::core::ffi::c_int > 1 as ::core::ffi::c_int {
-                                *(*output_pointer).offset(0 as ::core::ffi::c_int as isize) =
-                                    ((codepoint | first_byte_mark as ::core::ffi::c_ulong)
-                                        & 0xff as ::core::ffi::c_ulong)
-                                        as ::core::ffi::c_uchar;
-                            } else {
-                                *(*output_pointer).offset(0 as ::core::ffi::c_int as isize) =
-                                    (codepoint & 0x7f as ::core::ffi::c_ulong)
-                                        as ::core::ffi::c_uchar;
-                            }
-                            *output_pointer = (*output_pointer)
-                                .offset(utf8_length as ::core::ffi::c_int as isize);
-                            return sequence_length;
-                        }
-                    }
-                }
-            }
-        }
+    if input.len() < 6 {
+        return 0 as ::core::ffi::c_uchar;
     }
-    return 0 as ::core::ffi::c_uchar;
+
+    let first_code = parse_hex4(&input[2..6]);
+    if (0xdc00 as ::core::ffi::c_uint..=0xdfff as ::core::ffi::c_uint).contains(&first_code) {
+        return 0 as ::core::ffi::c_uchar;
+    }
+
+    let (sequence_length, mut codepoint) = if (0xd800 as ::core::ffi::c_uint
+        ..=0xdbff as ::core::ffi::c_uint)
+        .contains(&first_code)
+    {
+        if input.len() < 12
+            || input[6] as ::core::ffi::c_int != '\\' as i32
+            || input[7] as ::core::ffi::c_int != 'u' as i32
+        {
+            return 0 as ::core::ffi::c_uchar;
+        }
+
+        let second_code = parse_hex4(&input[8..12]);
+        if !(0xdc00 as ::core::ffi::c_uint..=0xdfff as ::core::ffi::c_uint).contains(&second_code) {
+            return 0 as ::core::ffi::c_uchar;
+        }
+
+        (
+            12 as ::core::ffi::c_uchar,
+            (0x10000 as ::core::ffi::c_int as ::core::ffi::c_uint).wrapping_add(
+                (first_code & 0x3ff as ::core::ffi::c_uint) << 10 as ::core::ffi::c_int
+                    | second_code & 0x3ff as ::core::ffi::c_uint,
+            ) as ::core::ffi::c_ulong,
+        )
+    } else {
+        (
+            6 as ::core::ffi::c_uchar,
+            first_code as ::core::ffi::c_ulong,
+        )
+    };
+
+    let (utf8_length, first_byte_mark) = if codepoint < 0x80 as ::core::ffi::c_ulong {
+        (1usize, 0 as ::core::ffi::c_uchar)
+    } else if codepoint < 0x800 as ::core::ffi::c_ulong {
+        (2usize, 0xc0 as ::core::ffi::c_uchar)
+    } else if codepoint < 0x10000 as ::core::ffi::c_ulong {
+        (3usize, 0xe0 as ::core::ffi::c_uchar)
+    } else if codepoint <= 0x10ffff as ::core::ffi::c_ulong {
+        (4usize, 0xf0 as ::core::ffi::c_uchar)
+    } else {
+        return 0 as ::core::ffi::c_uchar;
+    };
+
+    if output.capacity().saturating_sub(output.len()) < utf8_length {
+        return 0 as ::core::ffi::c_uchar;
+    }
+
+    let mut encoded = [0 as ::core::ffi::c_uchar; 4];
+    let mut utf8_position = utf8_length - 1;
+    while utf8_position > 0 {
+        encoded[utf8_position] = ((codepoint | 0x80 as ::core::ffi::c_ulong)
+            & 0xbf as ::core::ffi::c_ulong)
+            as ::core::ffi::c_uchar;
+        codepoint >>= 6 as ::core::ffi::c_int;
+        utf8_position -= 1;
+    }
+    if utf8_length > 1 {
+        encoded[0] = ((codepoint | first_byte_mark as ::core::ffi::c_ulong)
+            & 0xff as ::core::ffi::c_ulong) as ::core::ffi::c_uchar;
+    } else {
+        encoded[0] = (codepoint & 0x7f as ::core::ffi::c_ulong) as ::core::ffi::c_uchar;
+    }
+    output.extend_from_slice(&encoded[..utf8_length]);
+    return sequence_length;
 }
 
-unsafe extern "C" fn parse_string(
-    item: *mut crate::src::cJSON::cJSON,
-    input_buffer: *mut parse_buffer,
+fn parse_string(
+    item: &mut crate::src::cJSON::cJSON,
+    input_buffer: &mut parse_buffer<'_>,
+    content: &[::core::ffi::c_uchar],
 ) -> crate::src::cJSON::cJSON_bool {
-    let mut c2rust_current_block: u64;
-    let mut input_pointer: *const ::core::ffi::c_uchar = (*input_buffer)
-        .content
-        .offset((*input_buffer).offset as isize)
-        .offset(1 as ::core::ffi::c_int as isize);
-    let mut input_end: *const ::core::ffi::c_uchar = (*input_buffer)
-        .content
-        .offset((*input_buffer).offset as isize)
-        .offset(1 as ::core::ffi::c_int as isize);
-    let mut output_pointer: *mut ::core::ffi::c_uchar =
-        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut output: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if !(*(*input_buffer)
-        .content
-        .offset((*input_buffer).offset as isize)
-        .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-        != '"' as i32)
-    {
-        let mut allocation_length: crate::__stddef_size_t_h::size_t =
-            0 as crate::__stddef_size_t_h::size_t;
-        let mut skipped_bytes: crate::__stddef_size_t_h::size_t =
-            0 as crate::__stddef_size_t_h::size_t;
-        loop {
-            if !((input_end.offset_from((*input_buffer).content) as ::core::ffi::c_long
-                as crate::__stddef_size_t_h::size_t)
-                < (*input_buffer).length
-                && *input_end as ::core::ffi::c_int != '"' as i32)
-            {
-                c2rust_current_block = 11812396948646013369;
+    let start = input_buffer.offset;
+    let mut input_index = start.wrapping_add(1);
+    if content.get(start) != Some(&b'"') {
+        input_buffer.offset = input_index;
+        return false_0;
+    }
+
+    let mut input_end = input_index;
+    let mut skipped_bytes: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
+    let mut scan_failed = false;
+    while input_end < input_buffer.length && content.get(input_end) != Some(&b'"') {
+        let Some(&byte) = content.get(input_end) else {
+            scan_failed = true;
+            break;
+        };
+        if byte as ::core::ffi::c_int == '\\' as i32 {
+            if input_end.wrapping_add(1) >= input_buffer.length {
+                scan_failed = true;
                 break;
             }
-            if *input_end.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                == '\\' as i32
-            {
-                if input_end
-                    .offset(1 as ::core::ffi::c_int as isize)
-                    .offset_from((*input_buffer).content) as ::core::ffi::c_long
-                    as crate::__stddef_size_t_h::size_t
-                    >= (*input_buffer).length
-                {
-                    c2rust_current_block = 4600858903266057594;
+            skipped_bytes = skipped_bytes.wrapping_add(1);
+            input_end = input_end.wrapping_add(1);
+        }
+        input_end = input_end.wrapping_add(1);
+    }
+
+    if scan_failed || input_end >= input_buffer.length || content.get(input_end) != Some(&b'"') {
+        input_buffer.offset = input_index;
+        return false_0;
+    }
+
+    let allocation_length = input_end.wrapping_sub(start).wrapping_sub(skipped_bytes);
+    let allocation_size = allocation_length
+        .wrapping_add(
+            ::core::mem::size_of::<[::core::ffi::c_char; 1]>() as crate::__stddef_size_t_h::size_t
+        );
+    let mut decoded_bytes = Vec::new();
+    if decoded_bytes
+        .try_reserve_exact(allocation_size as usize)
+        .is_err()
+    {
+        input_buffer.offset = input_index;
+        return false_0;
+    }
+    let allocation_failure_offset = input_index;
+
+    let decoded = {
+        let mut decode_failed = false;
+        while input_index < input_end {
+            let Some(&byte) = content.get(input_index) else {
+                decode_failed = true;
+                break;
+            };
+            if byte as ::core::ffi::c_int != '\\' as i32 {
+                if decoded_bytes.capacity() > decoded_bytes.len() {
+                    decoded_bytes.push(byte);
+                    input_index = input_index.wrapping_add(1);
+                } else {
+                    decode_failed = true;
                     break;
                 }
-                skipped_bytes = skipped_bytes.wrapping_add(1);
-                input_end = input_end.offset(1);
-            }
-            input_end = input_end.offset(1);
-        }
-        match c2rust_current_block {
-            4600858903266057594 => {}
-            _ => {
-                if !(input_end.offset_from((*input_buffer).content) as ::core::ffi::c_long
-                    as crate::__stddef_size_t_h::size_t
-                    >= (*input_buffer).length
-                    || *input_end as ::core::ffi::c_int != '"' as i32)
-                {
-                    allocation_length = (input_end.offset_from(
-                        (*input_buffer)
-                            .content
-                            .offset((*input_buffer).offset as isize),
-                    ) as ::core::ffi::c_long
-                        as crate::__stddef_size_t_h::size_t)
-                        .wrapping_sub(skipped_bytes);
-                    output = (*input_buffer)
-                        .hooks
-                        .allocate
-                        .expect("non-null function pointer")(
-                        allocation_length
-                            .wrapping_add(::core::mem::size_of::<[::core::ffi::c_char; 1]>()
-                                as crate::__stddef_size_t_h::size_t),
-                    ) as *mut ::core::ffi::c_uchar;
-                    if !output.is_null() {
-                        output_pointer = output;
-                        loop {
-                            if !(input_pointer < input_end) {
-                                c2rust_current_block = 7828949454673616476;
-                                break;
-                            }
-                            if *input_pointer as ::core::ffi::c_int != '\\' as i32 {
-                                let c2rust_fresh0 = input_pointer;
-                                input_pointer = input_pointer.offset(1);
-                                let c2rust_fresh1 = output_pointer;
-                                output_pointer = output_pointer.offset(1);
-                                *c2rust_fresh1 = *c2rust_fresh0;
-                            } else {
-                                let mut sequence_length: ::core::ffi::c_uchar =
-                                    2 as ::core::ffi::c_uchar;
-                                if (input_end.offset_from(input_pointer) as ::core::ffi::c_long)
-                                    < 1 as ::core::ffi::c_long
-                                {
-                                    c2rust_current_block = 4600858903266057594;
-                                    break;
-                                }
-                                match *input_pointer.offset(1 as ::core::ffi::c_int as isize)
-                                    as ::core::ffi::c_int
-                                {
-                                    98 => {
-                                        let c2rust_fresh2 = output_pointer;
-                                        output_pointer = output_pointer.offset(1);
-                                        *c2rust_fresh2 = '\u{8}' as i32 as ::core::ffi::c_uchar;
-                                    }
-                                    102 => {
-                                        let c2rust_fresh3 = output_pointer;
-                                        output_pointer = output_pointer.offset(1);
-                                        *c2rust_fresh3 = '\u{c}' as i32 as ::core::ffi::c_uchar;
-                                    }
-                                    110 => {
-                                        let c2rust_fresh4 = output_pointer;
-                                        output_pointer = output_pointer.offset(1);
-                                        *c2rust_fresh4 = '\n' as i32 as ::core::ffi::c_uchar;
-                                    }
-                                    114 => {
-                                        let c2rust_fresh5 = output_pointer;
-                                        output_pointer = output_pointer.offset(1);
-                                        *c2rust_fresh5 = '\r' as i32 as ::core::ffi::c_uchar;
-                                    }
-                                    116 => {
-                                        let c2rust_fresh6 = output_pointer;
-                                        output_pointer = output_pointer.offset(1);
-                                        *c2rust_fresh6 = '\t' as i32 as ::core::ffi::c_uchar;
-                                    }
-                                    34 | 92 | 47 => {
-                                        let c2rust_fresh7 = output_pointer;
-                                        output_pointer = output_pointer.offset(1);
-                                        *c2rust_fresh7 =
-                                            *input_pointer.offset(1 as ::core::ffi::c_int as isize);
-                                    }
-                                    117 => {
-                                        sequence_length = utf16_literal_to_utf8(
-                                            input_pointer,
-                                            input_end,
-                                            &raw mut output_pointer,
-                                        );
-                                        if sequence_length as ::core::ffi::c_int
-                                            == 0 as ::core::ffi::c_int
-                                        {
-                                            c2rust_current_block = 4600858903266057594;
-                                            break;
-                                        }
-                                    }
-                                    _ => {
-                                        c2rust_current_block = 4600858903266057594;
-                                        break;
-                                    }
-                                }
-                                input_pointer = input_pointer
-                                    .offset(sequence_length as ::core::ffi::c_int as isize);
-                            }
-                        }
-                        match c2rust_current_block {
-                            4600858903266057594 => {}
-                            _ => {
-                                *output_pointer = '\0' as i32 as ::core::ffi::c_uchar;
-                                (*item).type_0 = crate::src::cJSON::cJSON_String;
-                                (*item).valuestring = output as *mut ::core::ffi::c_char;
-                                (*input_buffer).offset = input_end
-                                    .offset_from((*input_buffer).content)
-                                    as ::core::ffi::c_long
-                                    as crate::__stddef_size_t_h::size_t;
-                                (*input_buffer).offset = (*input_buffer).offset.wrapping_add(1);
-                                return true_0;
-                            }
+            } else {
+                let mut sequence_length: ::core::ffi::c_uchar = 2 as ::core::ffi::c_uchar;
+                if input_end.wrapping_sub(input_index) < 1 as crate::__stddef_size_t_h::size_t {
+                    decode_failed = true;
+                    break;
+                }
+                let Some(&escaped) = content.get(input_index.wrapping_add(1)) else {
+                    decode_failed = true;
+                    break;
+                };
+                match escaped as ::core::ffi::c_int {
+                    98 => {
+                        if decoded_bytes.capacity() > decoded_bytes.len() {
+                            decoded_bytes.push('\u{8}' as i32 as ::core::ffi::c_uchar);
+                        } else {
+                            decode_failed = true;
+                            break;
                         }
                     }
+                    102 => {
+                        if decoded_bytes.capacity() > decoded_bytes.len() {
+                            decoded_bytes.push('\u{c}' as i32 as ::core::ffi::c_uchar);
+                        } else {
+                            decode_failed = true;
+                            break;
+                        }
+                    }
+                    110 => {
+                        if decoded_bytes.capacity() > decoded_bytes.len() {
+                            decoded_bytes.push('\n' as i32 as ::core::ffi::c_uchar);
+                        } else {
+                            decode_failed = true;
+                            break;
+                        }
+                    }
+                    114 => {
+                        if decoded_bytes.capacity() > decoded_bytes.len() {
+                            decoded_bytes.push('\r' as i32 as ::core::ffi::c_uchar);
+                        } else {
+                            decode_failed = true;
+                            break;
+                        }
+                    }
+                    116 => {
+                        if decoded_bytes.capacity() > decoded_bytes.len() {
+                            decoded_bytes.push('\t' as i32 as ::core::ffi::c_uchar);
+                        } else {
+                            decode_failed = true;
+                            break;
+                        }
+                    }
+                    34 | 92 | 47 => {
+                        if decoded_bytes.capacity() > decoded_bytes.len() {
+                            decoded_bytes.push(escaped);
+                        } else {
+                            decode_failed = true;
+                            break;
+                        }
+                    }
+                    117 => {
+                        let Some(remaining_input) = content.get(input_index..input_end) else {
+                            decode_failed = true;
+                            break;
+                        };
+                        sequence_length =
+                            utf16_literal_to_utf8(remaining_input, &mut decoded_bytes);
+                        if sequence_length as ::core::ffi::c_int == 0 as ::core::ffi::c_int {
+                            decode_failed = true;
+                            break;
+                        }
+                    }
+                    _ => {
+                        decode_failed = true;
+                        break;
+                    }
                 }
+                input_index = input_index.wrapping_add(sequence_length as usize);
             }
         }
+        if !decode_failed {
+            if decoded_bytes.capacity() > decoded_bytes.len() {
+                decoded_bytes.push('\0' as i32 as ::core::ffi::c_uchar);
+            } else {
+                decode_failed = true;
+            }
+        }
+        !decode_failed
+    };
+
+    if decoded {
+        let Some(output_byte) = decoded_bytes.first_mut() else {
+            input_buffer.offset = allocation_failure_offset;
+            return false_0;
+        };
+        let output = output_byte as *mut ::core::ffi::c_uchar as *mut ::core::ffi::c_char;
+        {
+            let mut owned_strings = rust_owned_c_strings();
+            if owned_strings.try_reserve(1).is_err() {
+                input_buffer.offset = allocation_failure_offset;
+                return false_0;
+            }
+            owned_strings.insert(output as usize, decoded_bytes);
+        }
+        item.type_0 = crate::src::cJSON::cJSON_String;
+        item.valuestring = output;
+        input_buffer.offset = input_end.wrapping_add(1);
+        return true_0;
     }
-    if !output.is_null() {
-        (*input_buffer)
-            .hooks
-            .deallocate
-            .expect("non-null function pointer")(output as *mut ::core::ffi::c_void);
-        output = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    }
-    if !input_pointer.is_null() {
-        (*input_buffer).offset = input_pointer.offset_from((*input_buffer).content)
-            as ::core::ffi::c_long
-            as crate::__stddef_size_t_h::size_t;
-    }
+
+    input_buffer.offset = input_index;
     return false_0;
 }
 
-unsafe extern "C" fn print_string_ptr(
-    input: *const ::core::ffi::c_uchar,
-    output_buffer: *mut printbuffer,
+fn hex_digit(n: ::core::ffi::c_uchar) -> ::core::ffi::c_uchar {
+    match n {
+        0..=9 => b'0'.wrapping_add(n),
+        _ => b'a'.wrapping_add(n.wrapping_sub(10)),
+    }
+}
+
+fn print_string_ptr(
+    input: Option<&::std::ffi::CStr>,
+    output_buffer: Option<&mut printbuffer<'_>>,
 ) -> crate::src::cJSON::cJSON_bool {
-    let mut input_pointer: *const ::core::ffi::c_uchar =
-        ::core::ptr::null::<::core::ffi::c_uchar>();
-    let mut output: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut output_pointer: *mut ::core::ffi::c_uchar =
-        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    let mut output_length: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
+    let Some(output_buffer) = output_buffer else {
+        return false_0;
+    };
+    let input = match input {
+        Some(input) => input.to_bytes(),
+        None => b"",
+    };
     let mut escape_characters: crate::__stddef_size_t_h::size_t =
         0 as crate::__stddef_size_t_h::size_t;
-    if output_buffer.is_null() {
-        return false_0;
-    }
-    if input.is_null() {
-        output = ensure(
-            output_buffer,
-            ::core::mem::size_of::<[::core::ffi::c_char; 3]>() as crate::__stddef_size_t_h::size_t,
-        );
-        if output.is_null() {
-            return false_0;
-        }
-        crate::stdlib::strcpy(
-            output as *mut ::core::ffi::c_char,
-            b"\"\"\0".as_ptr() as *const ::core::ffi::c_char,
-        );
-        return true_0;
-    }
-    input_pointer = input;
-    while *input_pointer != 0 {
-        match *input_pointer as ::core::ffi::c_int {
+    for &byte in input {
+        match byte as ::core::ffi::c_int {
             34 | 92 | 8 | 12 | 10 | 13 | 9 => {
                 escape_characters = escape_characters.wrapping_add(1);
             }
             _ => {
-                if (*input_pointer as ::core::ffi::c_int) < 32 as ::core::ffi::c_int {
+                if (byte as ::core::ffi::c_int) < 32 as ::core::ffi::c_int {
                     escape_characters =
                         escape_characters.wrapping_add(5 as crate::__stddef_size_t_h::size_t);
                 }
             }
         }
-        input_pointer = input_pointer.offset(1);
     }
-    output_length = (input_pointer.offset_from(input) as ::core::ffi::c_long
-        as crate::__stddef_size_t_h::size_t)
-        .wrapping_add(escape_characters);
-    output = ensure(
-        output_buffer,
+    let output_length =
+        (input.len() as crate::__stddef_size_t_h::size_t).wrapping_add(escape_characters);
+    let needed =
         output_length
             .wrapping_add(::core::mem::size_of::<[::core::ffi::c_char; 3]>()
-                as crate::__stddef_size_t_h::size_t),
-    );
-    if output.is_null() {
+                as crate::__stddef_size_t_h::size_t);
+    let Some(output) = ensure(Some(&mut *output_buffer), needed) else {
         return false_0;
-    }
+    };
     if escape_characters == 0 as crate::__stddef_size_t_h::size_t {
-        *output.offset(0 as ::core::ffi::c_int as isize) = '"' as i32 as ::core::ffi::c_uchar;
-        crate::stdlib::memcpy(
-            output.offset(1 as ::core::ffi::c_int as isize) as *mut ::core::ffi::c_void,
-            input as *const ::core::ffi::c_void,
-            output_length,
-        );
-        *output
-            .offset(output_length.wrapping_add(1 as crate::__stddef_size_t_h::size_t) as isize) =
-            '"' as i32 as ::core::ffi::c_uchar;
-        *output
-            .offset(output_length.wrapping_add(2 as crate::__stddef_size_t_h::size_t) as isize) =
-            '\0' as i32 as ::core::ffi::c_uchar;
+        output[0] = b'"';
+        output[1..1 + input.len()].copy_from_slice(input);
+        output[output_length.wrapping_add(1)] = b'"';
+        output[output_length.wrapping_add(2)] = b'\0';
+        output_buffer.offset = output_buffer
+            .offset
+            .wrapping_add(output_length.wrapping_add(2));
         return true_0;
     }
-    *output.offset(0 as ::core::ffi::c_int as isize) = '"' as i32 as ::core::ffi::c_uchar;
-    output_pointer = output.offset(1 as ::core::ffi::c_int as isize);
-    input_pointer = input;
-    while *input_pointer as ::core::ffi::c_int != '\0' as i32 {
-        if *input_pointer as ::core::ffi::c_int > 31 as ::core::ffi::c_int
-            && *input_pointer as ::core::ffi::c_int != '"' as i32
-            && *input_pointer as ::core::ffi::c_int != '\\' as i32
+    output[0] = b'"';
+    let mut output_offset = 1usize;
+    for &byte in input {
+        if byte as ::core::ffi::c_int > 31 as ::core::ffi::c_int
+            && byte as ::core::ffi::c_int != '"' as i32
+            && byte as ::core::ffi::c_int != '\\' as i32
         {
-            *output_pointer = *input_pointer;
+            output[output_offset] = byte;
+            output_offset = output_offset.wrapping_add(1);
         } else {
-            let c2rust_fresh21 = output_pointer;
-            output_pointer = output_pointer.offset(1);
-            *c2rust_fresh21 = '\\' as i32 as ::core::ffi::c_uchar;
-            match *input_pointer as ::core::ffi::c_int {
+            output[output_offset] = b'\\';
+            output_offset = output_offset.wrapping_add(1);
+            match byte as ::core::ffi::c_int {
                 92 => {
-                    *output_pointer = '\\' as i32 as ::core::ffi::c_uchar;
+                    output[output_offset] = b'\\';
+                    output_offset = output_offset.wrapping_add(1);
                 }
                 34 => {
-                    *output_pointer = '"' as i32 as ::core::ffi::c_uchar;
+                    output[output_offset] = b'"';
+                    output_offset = output_offset.wrapping_add(1);
                 }
                 8 => {
-                    *output_pointer = 'b' as i32 as ::core::ffi::c_uchar;
+                    output[output_offset] = b'b';
+                    output_offset = output_offset.wrapping_add(1);
                 }
                 12 => {
-                    *output_pointer = 'f' as i32 as ::core::ffi::c_uchar;
+                    output[output_offset] = b'f';
+                    output_offset = output_offset.wrapping_add(1);
                 }
                 10 => {
-                    *output_pointer = 'n' as i32 as ::core::ffi::c_uchar;
+                    output[output_offset] = b'n';
+                    output_offset = output_offset.wrapping_add(1);
                 }
                 13 => {
-                    *output_pointer = 'r' as i32 as ::core::ffi::c_uchar;
+                    output[output_offset] = b'r';
+                    output_offset = output_offset.wrapping_add(1);
                 }
                 9 => {
-                    *output_pointer = 't' as i32 as ::core::ffi::c_uchar;
+                    output[output_offset] = b't';
+                    output_offset = output_offset.wrapping_add(1);
                 }
                 _ => {
-                    crate::stdlib::sprintf(
-                        output_pointer as *mut ::core::ffi::c_char,
-                        b"u%04x\0".as_ptr() as *const ::core::ffi::c_char,
-                        *input_pointer as ::core::ffi::c_int,
-                    );
-                    output_pointer = output_pointer.offset(4 as ::core::ffi::c_int as isize);
+                    output[output_offset] = b'u';
+                    output[output_offset.wrapping_add(1)] = b'0';
+                    output[output_offset.wrapping_add(2)] = b'0';
+                    output[output_offset.wrapping_add(3)] = hex_digit(byte >> 4);
+                    output[output_offset.wrapping_add(4)] = hex_digit(byte & 0xf);
+                    output_offset = output_offset.wrapping_add(5);
                 }
             }
         }
-        input_pointer = input_pointer.offset(1);
-        output_pointer = output_pointer.offset(1);
     }
-    *output.offset(output_length.wrapping_add(1 as crate::__stddef_size_t_h::size_t) as isize) =
-        '"' as i32 as ::core::ffi::c_uchar;
-    *output.offset(output_length.wrapping_add(2 as crate::__stddef_size_t_h::size_t) as isize) =
-        '\0' as i32 as ::core::ffi::c_uchar;
+    output[output_length.wrapping_add(1)] = b'"';
+    output[output_length.wrapping_add(2)] = b'\0';
+    output_buffer.offset = output_buffer
+        .offset
+        .wrapping_add(output_length.wrapping_add(2));
     return true_0;
 }
 
-unsafe extern "C" fn print_string(
-    item: *const crate::src::cJSON::cJSON,
-    p: *mut printbuffer,
-) -> crate::src::cJSON::cJSON_bool {
-    return print_string_ptr((*item).valuestring as *mut ::core::ffi::c_uchar, p);
+fn buffer_skip_whitespace(buffer: Option<&mut parse_buffer<'_>>) -> bool {
+    let Some(buffer) = buffer else {
+        return false;
+    };
+    if buffer
+        .offset
+        .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
+        >= buffer.length
+    {
+        return true;
+    }
+    let content = buffer.content;
+    while let Some(&byte) = content.get(buffer.offset as usize) {
+        if byte as ::core::ffi::c_int > 32 as ::core::ffi::c_int {
+            break;
+        }
+        buffer.offset = buffer.offset.wrapping_add(1);
+    }
+    if buffer.offset == buffer.length {
+        buffer.offset = buffer.offset.wrapping_sub(1);
+    }
+    true
 }
 
-unsafe extern "C" fn buffer_skip_whitespace(buffer: *mut parse_buffer) -> *mut parse_buffer {
-    if buffer.is_null() || (*buffer).content.is_null() {
-        return ::core::ptr::null_mut::<parse_buffer>();
+fn skip_utf8_bom(buffer: Option<&mut parse_buffer<'_>>) -> bool {
+    let Some(buffer) = buffer else {
+        return false;
+    };
+    if buffer.offset != 0 as crate::__stddef_size_t_h::size_t {
+        return false;
     }
-    if !(!buffer.is_null()
-        && (*buffer)
-            .offset
-            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-            < (*buffer).length)
+    let content = buffer.content;
+    if buffer
+        .offset
+        .wrapping_add(4 as crate::__stddef_size_t_h::size_t)
+        < buffer.length
+        && content.get(buffer.offset as usize..buffer.offset as usize + 3)
+            == Some(&b"\xEF\xBB\xBF"[..])
     {
-        return buffer;
-    }
-    while !buffer.is_null()
-        && (*buffer)
-            .offset
-            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-            < (*buffer).length
-        && *(*buffer)
-            .content
-            .offset((*buffer).offset as isize)
-            .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            <= 32 as ::core::ffi::c_int
-    {
-        (*buffer).offset = (*buffer).offset.wrapping_add(1);
-    }
-    if (*buffer).offset == (*buffer).length {
-        (*buffer).offset = (*buffer).offset.wrapping_sub(1);
-    }
-    return buffer;
-}
-
-unsafe extern "C" fn skip_utf8_bom(buffer: *mut parse_buffer) -> *mut parse_buffer {
-    if buffer.is_null()
-        || (*buffer).content.is_null()
-        || (*buffer).offset != 0 as crate::__stddef_size_t_h::size_t
-    {
-        return ::core::ptr::null_mut::<parse_buffer>();
-    }
-    if !buffer.is_null()
-        && (*buffer)
-            .offset
-            .wrapping_add(4 as crate::__stddef_size_t_h::size_t)
-            < (*buffer).length
-        && crate::stdlib::strncmp(
-            (*buffer).content.offset((*buffer).offset as isize) as *const ::core::ffi::c_char,
-            b"\xEF\xBB\xBF\0".as_ptr() as *const ::core::ffi::c_char,
-            3 as crate::__stddef_size_t_h::size_t,
-        ) == 0 as ::core::ffi::c_int
-    {
-        (*buffer).offset = (*buffer)
+        buffer.offset = buffer
             .offset
             .wrapping_add(3 as crate::__stddef_size_t_h::size_t);
     }
-    return buffer;
+    true
 }
-pub unsafe extern "C" fn cJSON_ParseWithOpts(
-    mut value: *const ::core::ffi::c_char,
-    mut return_parse_end: *mut *const ::core::ffi::c_char,
-    mut require_null_terminated: crate::src::cJSON::cJSON_bool,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut buffer_length: crate::__stddef_size_t_h::size_t = 0;
-    if value.is_null() {
-        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    }
-    buffer_length = crate::stdlib::strlen(value)
-        .wrapping_add(
-            ::core::mem::size_of::<[::core::ffi::c_char; 1]>() as crate::__stddef_size_t_h::size_t
-        );
-    return cJSON_ParseWithLengthOpts(
-        value,
-        buffer_length,
-        return_parse_end,
-        require_null_terminated,
-    );
+
+macro_rules! printable_tree_from_raw {
+    ($item:expr) => {{
+        'build: {
+            let Some(raw_item) = (unsafe { ($item).as_ref() }) else {
+                break 'build None;
+            };
+            let raw_type = raw_item.type_0 & 0xff as ::core::ffi::c_int;
+            let mut root = printable_cjson {
+                type_0: raw_item.type_0,
+                valuestring: if raw_type == crate::src::cJSON::cJSON_String
+                    || raw_type == crate::src::cJSON::cJSON_Raw
+                {
+                    if raw_item.valuestring.is_null() {
+                        None
+                    } else {
+                        Some(unsafe { ::std::ffi::CStr::from_ptr(raw_item.valuestring) })
+                    }
+                } else {
+                    None
+                },
+                valueint: raw_item.valueint,
+                valuedouble: raw_item.valuedouble,
+                string: None,
+                children: Vec::new(),
+            };
+            let mut stack: Vec<(Vec<usize>, *const crate::src::cJSON::cJSON, bool)> = Vec::new();
+            if (raw_type == crate::src::cJSON::cJSON_Array
+                || raw_type == crate::src::cJSON::cJSON_Object)
+                && !raw_item.child.is_null()
+            {
+                if stack.try_reserve_exact(1).is_err() {
+                    break 'build None;
+                }
+                stack.push((
+                    Vec::new(),
+                    raw_item.child,
+                    raw_type == crate::src::cJSON::cJSON_Object,
+                ));
+            }
+            while let Some((parent_path, mut child, names_are_used)) = stack.pop() {
+                while let Some(child_ref) = unsafe { child.as_ref() } {
+                    let child_type = child_ref.type_0 & 0xff as ::core::ffi::c_int;
+                    let printable_child = printable_cjson {
+                        type_0: child_ref.type_0,
+                        valuestring: if child_type == crate::src::cJSON::cJSON_String
+                            || child_type == crate::src::cJSON::cJSON_Raw
+                        {
+                            if child_ref.valuestring.is_null() {
+                                None
+                            } else {
+                                Some(unsafe { ::std::ffi::CStr::from_ptr(child_ref.valuestring) })
+                            }
+                        } else {
+                            None
+                        },
+                        valueint: child_ref.valueint,
+                        valuedouble: child_ref.valuedouble,
+                        string: if names_are_used && !child_ref.string.is_null() {
+                            Some(unsafe { ::std::ffi::CStr::from_ptr(child_ref.string) })
+                        } else {
+                            None
+                        },
+                        children: Vec::new(),
+                    };
+                    let child_index = {
+                        let Some(parent) = printable_child_at_path_mut(&mut root, &parent_path)
+                        else {
+                            break 'build None;
+                        };
+                        if parent.children.try_reserve_exact(1).is_err() {
+                            break 'build None;
+                        }
+                        parent.children.push(printable_child);
+                        parent.children.len().wrapping_sub(1)
+                    };
+                    if (child_type == crate::src::cJSON::cJSON_Array
+                        || child_type == crate::src::cJSON::cJSON_Object)
+                        && !child_ref.child.is_null()
+                    {
+                        let mut child_path = parent_path.clone();
+                        if child_path.try_reserve_exact(1).is_err() {
+                            break 'build None;
+                        }
+                        child_path.push(child_index);
+                        if stack.try_reserve_exact(1).is_err() {
+                            break 'build None;
+                        }
+                        stack.push((
+                            child_path,
+                            child_ref.child,
+                            child_type == crate::src::cJSON::cJSON_Object,
+                        ));
+                    }
+                    child = child_ref.next;
+                }
+            }
+            Some(root)
+        }
+    }};
+}
+
+macro_rules! duplicate_tree_from_raw {
+    ($item:expr, $recurse:expr, $depth:expr) => {{
+        'build: {
+            let Some(raw_item) = (unsafe { ($item).as_ref() }) else {
+                break 'build None;
+            };
+            let mut root = printable_cjson {
+                type_0: raw_item.type_0,
+                valuestring: if raw_item.valuestring.is_null() {
+                    None
+                } else {
+                    Some(unsafe { ::std::ffi::CStr::from_ptr(raw_item.valuestring) })
+                },
+                valueint: raw_item.valueint,
+                valuedouble: raw_item.valuedouble,
+                string: if raw_item.string.is_null() {
+                    None
+                } else {
+                    Some(unsafe { ::std::ffi::CStr::from_ptr(raw_item.string) })
+                },
+                children: Vec::new(),
+            };
+            let raw_type = raw_item.type_0 & 0xff as ::core::ffi::c_int;
+            let mut stack: Vec<(
+                Vec<usize>,
+                *const crate::src::cJSON::cJSON,
+                crate::__stddef_size_t_h::size_t,
+            )> = Vec::new();
+            if $recurse != 0
+                && (raw_type == crate::src::cJSON::cJSON_Array
+                    || raw_type == crate::src::cJSON::cJSON_Object)
+                && !raw_item.child.is_null()
+            {
+                if stack.try_reserve_exact(1).is_err() {
+                    break 'build None;
+                }
+                stack.push((Vec::new(), raw_item.child, $depth));
+            }
+            while let Some((parent_path, mut child, parent_depth)) = stack.pop() {
+                if parent_depth
+                    >= crate::src::cJSON::CJSON_CIRCULAR_LIMIT as crate::__stddef_size_t_h::size_t
+                {
+                    break 'build None;
+                }
+                while let Some(child_ref) = unsafe { child.as_ref() } {
+                    let child_type = child_ref.type_0 & 0xff as ::core::ffi::c_int;
+                    let duplicate_child = printable_cjson {
+                        type_0: child_ref.type_0,
+                        valuestring: if child_ref.valuestring.is_null() {
+                            None
+                        } else {
+                            Some(unsafe { ::std::ffi::CStr::from_ptr(child_ref.valuestring) })
+                        },
+                        valueint: child_ref.valueint,
+                        valuedouble: child_ref.valuedouble,
+                        string: if child_ref.string.is_null() {
+                            None
+                        } else {
+                            Some(unsafe { ::std::ffi::CStr::from_ptr(child_ref.string) })
+                        },
+                        children: Vec::new(),
+                    };
+                    let child_index = {
+                        let Some(parent) = printable_child_at_path_mut(&mut root, &parent_path)
+                        else {
+                            break 'build None;
+                        };
+                        if parent.children.try_reserve_exact(1).is_err() {
+                            break 'build None;
+                        }
+                        parent.children.push(duplicate_child);
+                        parent.children.len().wrapping_sub(1)
+                    };
+                    if (child_type == crate::src::cJSON::cJSON_Array
+                        || child_type == crate::src::cJSON::cJSON_Object)
+                        && !child_ref.child.is_null()
+                    {
+                        let mut child_path = parent_path.clone();
+                        if child_path.try_reserve_exact(1).is_err() {
+                            break 'build None;
+                        }
+                        child_path.push(child_index);
+                        if stack.try_reserve_exact(1).is_err() {
+                            break 'build None;
+                        }
+                        stack.push((
+                            child_path,
+                            child_ref.child,
+                            parent_depth.wrapping_add(1 as crate::__stddef_size_t_h::size_t),
+                        ));
+                    }
+                    child = child_ref.next;
+                }
+            }
+            Some(root)
+        }
+    }};
 }
 #[export_name = "cJSON_ParseWithOpts"]
 
@@ -1319,92 +1503,65 @@ pub unsafe extern "C" fn cJSON_ParseWithOpts_ffi(
     mut return_parse_end: *mut *const ::core::ffi::c_char,
     mut require_null_terminated: crate::src::cJSON::cJSON_bool,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_ParseWithOpts(value, return_parse_end, require_null_terminated)
+    let mut buffer_length: crate::__stddef_size_t_h::size_t = 0;
+    if value.is_null() {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    }
+    buffer_length = ::std::ffi::CStr::from_ptr(value).to_bytes_with_nul().len();
+    return cJSON_ParseWithLengthOpts_ffi(
+        value,
+        buffer_length,
+        return_parse_end,
+        require_null_terminated,
+    );
 }
-pub unsafe extern "C" fn cJSON_ParseWithLengthOpts(
-    mut value: *const ::core::ffi::c_char,
-    mut buffer_length: crate::__stddef_size_t_h::size_t,
-    mut return_parse_end: *mut *const ::core::ffi::c_char,
+fn cJSON_ParseWithLengthOpts(
+    value: &[::core::ffi::c_uchar],
+    item: &mut crate::src::cJSON::cJSON,
+    hooks: internal_hooks,
     mut require_null_terminated: crate::src::cJSON::cJSON_bool,
-) -> *mut crate::src::cJSON::cJSON {
+) -> Result<crate::__stddef_size_t_h::size_t, crate::__stddef_size_t_h::size_t> {
     let mut c2rust_current_block: u64;
-    let mut buffer: parse_buffer = parse_buffer {
-        content: ::core::ptr::null::<::core::ffi::c_uchar>(),
-        length: 0 as crate::__stddef_size_t_h::size_t,
+    let mut buffer: parse_buffer<'_> = parse_buffer {
+        content: value,
+        length: value.len() as crate::__stddef_size_t_h::size_t,
         offset: 0 as crate::__stddef_size_t_h::size_t,
         depth: 0 as crate::__stddef_size_t_h::size_t,
-        hooks: internal_hooks {
-            allocate: None,
-            deallocate: None,
-            reallocate: None,
-        },
+        hooks,
     };
-    let mut item: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    global_error.json = ::core::ptr::null::<::core::ffi::c_uchar>();
-    global_error.position = 0 as crate::__stddef_size_t_h::size_t;
-    if !(value.is_null() || 0 as crate::__stddef_size_t_h::size_t == buffer_length) {
-        buffer.content = value as *const ::core::ffi::c_uchar;
-        buffer.length = buffer_length;
-        buffer.offset = 0 as crate::__stddef_size_t_h::size_t;
-        buffer.hooks = global_hooks;
-        item = cJSON_New_Item(&raw mut global_hooks);
-        if !item.is_null() {
-            if !(parse_value(item, buffer_skip_whitespace(skip_utf8_bom(&raw mut buffer))) == 0) {
-                if require_null_terminated != 0 {
-                    buffer_skip_whitespace(&raw mut buffer);
-                    if buffer.offset >= buffer.length
-                        || *buffer
-                            .content
-                            .offset(buffer.offset as isize)
-                            .offset(0 as ::core::ffi::c_int as isize)
-                            as ::core::ffi::c_int
-                            != '\0' as i32
-                    {
-                        c2rust_current_block = 11194366360035625197;
-                    } else {
-                        c2rust_current_block = 1841672684692190573;
-                    }
+    if !value.is_empty() {
+        let valid_buffer =
+            skip_utf8_bom(Some(&mut buffer)) && buffer_skip_whitespace(Some(&mut buffer));
+        if valid_buffer && !(parse_value(item, &mut buffer) == 0) {
+            if require_null_terminated != 0 {
+                buffer_skip_whitespace(Some(&mut buffer));
+                if buffer.offset >= buffer.length
+                    || buffer.content.get(buffer.offset as usize) != Some(&b'\0')
+                {
+                    c2rust_current_block = 11194366360035625197;
                 } else {
                     c2rust_current_block = 1841672684692190573;
                 }
-                match c2rust_current_block {
-                    11194366360035625197 => {}
-                    _ => {
-                        if !return_parse_end.is_null() {
-                            *return_parse_end = buffer.content.offset(buffer.offset as isize)
-                                as *const ::core::ffi::c_char;
-                        }
-                        return item;
-                    }
+            } else {
+                c2rust_current_block = 1841672684692190573;
+            }
+            match c2rust_current_block {
+                11194366360035625197 => {}
+                _ => {
+                    return Ok(buffer.offset);
                 }
             }
         }
     }
-    if !item.is_null() {
-        cJSON_Delete(item);
+    let mut local_error_position = 0 as crate::__stddef_size_t_h::size_t;
+    if buffer.offset < buffer.length {
+        local_error_position = buffer.offset;
+    } else if buffer.length > 0 as crate::__stddef_size_t_h::size_t {
+        local_error_position = buffer
+            .length
+            .wrapping_sub(1 as crate::__stddef_size_t_h::size_t);
     }
-    if !value.is_null() {
-        let mut local_error: error = error {
-            json: ::core::ptr::null::<::core::ffi::c_uchar>(),
-            position: 0,
-        };
-        local_error.json = value as *const ::core::ffi::c_uchar;
-        local_error.position = 0 as crate::__stddef_size_t_h::size_t;
-        if buffer.offset < buffer.length {
-            local_error.position = buffer.offset;
-        } else if buffer.length > 0 as crate::__stddef_size_t_h::size_t {
-            local_error.position = buffer
-                .length
-                .wrapping_sub(1 as crate::__stddef_size_t_h::size_t);
-        }
-        if !return_parse_end.is_null() {
-            *return_parse_end = (local_error.json as *const ::core::ffi::c_char)
-                .offset(local_error.position as isize);
-        }
-        global_error = local_error;
-    }
-    return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    Err(local_error_position)
 }
 #[export_name = "cJSON_ParseWithLengthOpts"]
 
@@ -1414,36 +1571,68 @@ pub unsafe extern "C" fn cJSON_ParseWithLengthOpts_ffi(
     mut return_parse_end: *mut *const ::core::ffi::c_char,
     mut require_null_terminated: crate::src::cJSON::cJSON_bool,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_ParseWithLengthOpts(
-        value,
-        buffer_length,
-        return_parse_end,
-        require_null_terminated,
-    )
-}
-pub unsafe extern "C" fn cJSON_Parse(
-    mut value: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    return cJSON_ParseWithOpts(
-        value,
-        ::core::ptr::null_mut::<*const ::core::ffi::c_char>(),
-        0 as crate::src::cJSON::cJSON_bool,
-    );
+    let input = if value.is_null() {
+        None
+    } else {
+        Some(unsafe {
+            ::core::slice::from_raw_parts(value as *const ::core::ffi::c_uchar, buffer_length)
+        })
+    };
+    reset_global_error();
+    let Some(input) = input else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    let hooks = global_hooks_snapshot();
+    let mut item: *mut crate::src::cJSON::cJSON =
+        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    if !input.is_empty() {
+        if let Some(item_ref) = cJSON_New_Item(&hooks) {
+            item = item_ref as *mut crate::src::cJSON::cJSON;
+            match cJSON_ParseWithLengthOpts(input, item_ref, hooks, require_null_terminated) {
+                Ok(parse_end_offset) => {
+                    if !return_parse_end.is_null() {
+                        unsafe {
+                            *return_parse_end = value.wrapping_add(parse_end_offset);
+                        }
+                    }
+                    return item;
+                }
+                Err(parse_end_offset) => {
+                    if !return_parse_end.is_null() {
+                        unsafe {
+                            *return_parse_end = value.wrapping_add(parse_end_offset);
+                        }
+                    }
+                    set_global_error(error {
+                        json: value as usize,
+                        position: parse_end_offset,
+                    });
+                    unsafe {
+                        cJSON_Delete_ffi(item);
+                    }
+                    return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+                }
+            }
+        }
+    }
+    if !return_parse_end.is_null() {
+        unsafe {
+            *return_parse_end = value;
+        }
+    }
+    set_global_error(error {
+        json: value as usize,
+        position: 0 as crate::__stddef_size_t_h::size_t,
+    });
+    ::core::ptr::null_mut::<crate::src::cJSON::cJSON>()
 }
 #[export_name = "cJSON_Parse"]
 
 pub unsafe extern "C" fn cJSON_Parse_ffi(
     mut value: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_Parse(value)
-}
-pub unsafe extern "C" fn cJSON_ParseWithLength(
-    mut value: *const ::core::ffi::c_char,
-    mut buffer_length: crate::__stddef_size_t_h::size_t,
-) -> *mut crate::src::cJSON::cJSON {
-    return cJSON_ParseWithLengthOpts(
+    return cJSON_ParseWithOpts_ffi(
         value,
-        buffer_length,
         ::core::ptr::null_mut::<*const ::core::ffi::c_char>(),
         0 as crate::src::cJSON::cJSON_bool,
     );
@@ -1454,178 +1643,91 @@ pub unsafe extern "C" fn cJSON_ParseWithLength_ffi(
     mut value: *const ::core::ffi::c_char,
     mut buffer_length: crate::__stddef_size_t_h::size_t,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_ParseWithLength(value, buffer_length)
-}
-unsafe extern "C" fn print(
-    item: *const crate::src::cJSON::cJSON,
-    mut format: crate::src::cJSON::cJSON_bool,
-    hooks: *const internal_hooks,
-) -> *mut ::core::ffi::c_uchar {
-    let mut c2rust_current_block: u64;
-    static mut default_buffer_size: crate::__stddef_size_t_h::size_t =
-        256 as crate::__stddef_size_t_h::size_t;
-    let mut buffer: [printbuffer; 1] = [printbuffer {
-        buffer: ::core::ptr::null_mut::<::core::ffi::c_uchar>(),
-        length: 0,
-        offset: 0,
-        depth: 0,
-        noalloc: 0,
-        format: 0,
-        hooks: internal_hooks {
-            allocate: None,
-            deallocate: None,
-            reallocate: None,
-        },
-    }; 1];
-    let mut printed: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    crate::stdlib::memset(
-        &raw mut buffer as *mut printbuffer as *mut ::core::ffi::c_void,
-        0 as ::core::ffi::c_int,
-        ::core::mem::size_of::<[printbuffer; 1]>() as crate::__stddef_size_t_h::size_t,
+    return cJSON_ParseWithLengthOpts_ffi(
+        value,
+        buffer_length,
+        ::core::ptr::null_mut::<*const ::core::ffi::c_char>(),
+        0 as crate::src::cJSON::cJSON_bool,
     );
-    let ref mut c2rust_fresh8 = (*(&raw mut buffer as *mut printbuffer)).buffer;
-    *c2rust_fresh8 = (*hooks).allocate.expect("non-null function pointer")(default_buffer_size)
-        as *mut ::core::ffi::c_uchar;
-    (*(&raw mut buffer as *mut printbuffer)).length = default_buffer_size;
-    (*(&raw mut buffer as *mut printbuffer)).format = format;
-    (*(&raw mut buffer as *mut printbuffer)).hooks = *hooks;
-    if !(*(&raw mut buffer as *mut printbuffer)).buffer.is_null() {
-        if !(print_value(item, &raw mut buffer as *mut printbuffer) == 0) {
-            update_offset(&raw mut buffer as *mut printbuffer);
-            if (*hooks).reallocate.is_some() {
-                printed = (*hooks).reallocate.expect("non-null function pointer")(
-                    (*(&raw mut buffer as *mut printbuffer)).buffer as *mut ::core::ffi::c_void,
-                    (*(&raw mut buffer as *mut printbuffer))
-                        .offset
-                        .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-                ) as *mut ::core::ffi::c_uchar;
-                if printed.is_null() {
-                    c2rust_current_block = 15492938347856135346;
-                } else {
-                    let ref mut c2rust_fresh9 = (*(&raw mut buffer as *mut printbuffer)).buffer;
-                    *c2rust_fresh9 = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                    c2rust_current_block = 7149356873433890176;
-                }
-            } else {
-                printed = (*hooks).allocate.expect("non-null function pointer")(
-                    (*(&raw mut buffer as *mut printbuffer))
-                        .offset
-                        .wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-                ) as *mut ::core::ffi::c_uchar;
-                if printed.is_null() {
-                    c2rust_current_block = 15492938347856135346;
-                } else {
-                    crate::stdlib::memcpy(
-                        printed as *mut ::core::ffi::c_void,
-                        (*(&raw mut buffer as *mut printbuffer)).buffer
-                            as *const ::core::ffi::c_void,
-                        if (*(&raw mut buffer as *mut printbuffer)).length
-                            < (*(&raw mut buffer as *mut printbuffer))
-                                .offset
-                                .wrapping_add(1 as crate::__stddef_size_t_h::size_t)
-                        {
-                            (*(&raw mut buffer as *mut printbuffer)).length
-                        } else {
-                            (*(&raw mut buffer as *mut printbuffer))
-                                .offset
-                                .wrapping_add(1 as crate::__stddef_size_t_h::size_t)
-                        },
-                    );
-                    *printed.offset((*(&raw mut buffer as *mut printbuffer)).offset as isize) =
-                        '\0' as i32 as ::core::ffi::c_uchar;
-                    (*hooks).deallocate.expect("non-null function pointer")(
-                        (*(&raw mut buffer as *mut printbuffer)).buffer as *mut ::core::ffi::c_void,
-                    );
-                    let ref mut c2rust_fresh10 = (*(&raw mut buffer as *mut printbuffer)).buffer;
-                    *c2rust_fresh10 = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-                    c2rust_current_block = 7149356873433890176;
-                }
-            }
-            match c2rust_current_block {
-                15492938347856135346 => {}
-                _ => return printed,
-            }
-        }
-    }
-    if !(*(&raw mut buffer as *mut printbuffer)).buffer.is_null() {
-        (*hooks).deallocate.expect("non-null function pointer")(
-            (*(&raw mut buffer as *mut printbuffer)).buffer as *mut ::core::ffi::c_void,
-        );
-        let ref mut c2rust_fresh11 = (*(&raw mut buffer as *mut printbuffer)).buffer;
-        *c2rust_fresh11 = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    }
-    if !printed.is_null() {
-        (*hooks).deallocate.expect("non-null function pointer")(
-            printed as *mut ::core::ffi::c_void,
-        );
-        printed = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    }
-    return ::core::ptr::null_mut::<::core::ffi::c_uchar>();
 }
-pub unsafe extern "C" fn cJSON_Print(
-    mut item: *const crate::src::cJSON::cJSON,
-) -> *mut ::core::ffi::c_char {
-    return print(item, true_0, &raw mut global_hooks) as *mut ::core::ffi::c_char;
+fn print(
+    item: Option<&printable_cjson<'_>>,
+    format: crate::src::cJSON::cJSON_bool,
+) -> Option<Vec<::core::ffi::c_uchar>> {
+    let default_buffer_size: crate::__stddef_size_t_h::size_t =
+        256 as crate::__stddef_size_t_h::size_t;
+    let Some(mut buffer) = printbuffer::owned(default_buffer_size, format) else {
+        return None;
+    };
+    let printed_value = match item {
+        Some(item) => print_value(item, &mut buffer),
+        None => false_0,
+    };
+    if printed_value != 0 {
+        let output_length = buffer
+            .offset
+            .wrapping_add(1 as crate::__stddef_size_t_h::size_t);
+        let Some(bytes) = buffer.bytes().get(..output_length as usize) else {
+            return None;
+        };
+        let mut printed = Vec::new();
+        if printed.try_reserve_exact(bytes.len()).is_err() {
+            return None;
+        }
+        printed.extend_from_slice(bytes);
+        return Some(printed);
+    }
+    return None;
 }
 #[export_name = "cJSON_Print"]
 
 pub unsafe extern "C" fn cJSON_Print_ffi(
     mut item: *const crate::src::cJSON::cJSON,
 ) -> *mut ::core::ffi::c_char {
-    cJSON_Print(item)
-}
-pub unsafe extern "C" fn cJSON_PrintUnformatted(
-    mut item: *const crate::src::cJSON::cJSON,
-) -> *mut ::core::ffi::c_char {
-    return print(item, false_0, &raw mut global_hooks) as *mut ::core::ffi::c_char;
+    let hooks = global_hooks_snapshot();
+    let Some(printable_item) = printable_tree_from_raw!(item) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let Some(bytes) = print(Some(&printable_item), true_0) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let printed = unsafe {
+        hooks.allocate.expect("non-null function pointer")(
+            bytes.len() as crate::__stddef_size_t_h::size_t
+        )
+    } as *mut ::core::ffi::c_uchar;
+    if printed.is_null() {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    }
+    unsafe {
+        ::core::ptr::copy_nonoverlapping(bytes.as_ptr(), printed, bytes.len());
+    }
+    return printed as *mut ::core::ffi::c_char;
 }
 #[export_name = "cJSON_PrintUnformatted"]
 
 pub unsafe extern "C" fn cJSON_PrintUnformatted_ffi(
     mut item: *const crate::src::cJSON::cJSON,
 ) -> *mut ::core::ffi::c_char {
-    cJSON_PrintUnformatted(item)
-}
-pub unsafe extern "C" fn cJSON_PrintBuffered(
-    mut item: *const crate::src::cJSON::cJSON,
-    mut prebuffer: ::core::ffi::c_int,
-    mut fmt: crate::src::cJSON::cJSON_bool,
-) -> *mut ::core::ffi::c_char {
-    let mut p: printbuffer = printbuffer {
-        buffer: ::core::ptr::null_mut::<::core::ffi::c_uchar>(),
-        length: 0 as crate::__stddef_size_t_h::size_t,
-        offset: 0 as crate::__stddef_size_t_h::size_t,
-        depth: 0 as crate::__stddef_size_t_h::size_t,
-        noalloc: 0 as crate::src::cJSON::cJSON_bool,
-        format: 0 as crate::src::cJSON::cJSON_bool,
-        hooks: internal_hooks {
-            allocate: None,
-            deallocate: None,
-            reallocate: None,
-        },
+    let hooks = global_hooks_snapshot();
+    let Some(printable_item) = printable_tree_from_raw!(item) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
     };
-    if prebuffer < 0 as ::core::ffi::c_int {
+    let Some(bytes) = print(Some(&printable_item), false_0) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let printed = unsafe {
+        hooks.allocate.expect("non-null function pointer")(
+            bytes.len() as crate::__stddef_size_t_h::size_t
+        )
+    } as *mut ::core::ffi::c_uchar;
+    if printed.is_null() {
         return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    p.buffer = global_hooks.allocate.expect("non-null function pointer")(
-        prebuffer as crate::__stddef_size_t_h::size_t,
-    ) as *mut ::core::ffi::c_uchar;
-    if p.buffer.is_null() {
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    unsafe {
+        ::core::ptr::copy_nonoverlapping(bytes.as_ptr(), printed, bytes.len());
     }
-    p.length = prebuffer as crate::__stddef_size_t_h::size_t;
-    p.offset = 0 as crate::__stddef_size_t_h::size_t;
-    p.noalloc = false_0;
-    p.format = fmt;
-    p.hooks = global_hooks;
-    if print_value(item, &raw mut p) == 0 {
-        global_hooks.deallocate.expect("non-null function pointer")(
-            p.buffer as *mut ::core::ffi::c_void,
-        );
-        p.buffer = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-        return ::core::ptr::null_mut::<::core::ffi::c_char>();
-    }
-    return p.buffer as *mut ::core::ffi::c_char;
+    return printed as *mut ::core::ffi::c_char;
 }
 #[export_name = "cJSON_PrintBuffered"]
 
@@ -1634,37 +1736,32 @@ pub unsafe extern "C" fn cJSON_PrintBuffered_ffi(
     mut prebuffer: ::core::ffi::c_int,
     mut fmt: crate::src::cJSON::cJSON_bool,
 ) -> *mut ::core::ffi::c_char {
-    cJSON_PrintBuffered(item, prebuffer, fmt)
-}
-pub unsafe extern "C" fn cJSON_PrintPreallocated(
-    mut item: *mut crate::src::cJSON::cJSON,
-    mut buffer: *mut ::core::ffi::c_char,
-    length: ::core::ffi::c_int,
-    format: crate::src::cJSON::cJSON_bool,
-) -> crate::src::cJSON::cJSON_bool {
-    let mut p: printbuffer = printbuffer {
-        buffer: ::core::ptr::null_mut::<::core::ffi::c_uchar>(),
-        length: 0 as crate::__stddef_size_t_h::size_t,
-        offset: 0 as crate::__stddef_size_t_h::size_t,
-        depth: 0 as crate::__stddef_size_t_h::size_t,
-        noalloc: 0 as crate::src::cJSON::cJSON_bool,
-        format: 0 as crate::src::cJSON::cJSON_bool,
-        hooks: internal_hooks {
-            allocate: None,
-            deallocate: None,
-            reallocate: None,
-        },
-    };
-    if length < 0 as ::core::ffi::c_int || buffer.is_null() {
-        return false_0;
+    if prebuffer < 0 as ::core::ffi::c_int {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
     }
-    p.buffer = buffer as *mut ::core::ffi::c_uchar;
-    p.length = length as crate::__stddef_size_t_h::size_t;
-    p.offset = 0 as crate::__stddef_size_t_h::size_t;
-    p.noalloc = true_0;
-    p.format = format;
-    p.hooks = global_hooks;
-    return print_value(item, &raw mut p);
+    let hooks = global_hooks_snapshot();
+    let Some(mut p) = printbuffer::owned(prebuffer as crate::__stddef_size_t_h::size_t, fmt) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let Some(printable_item) = printable_tree_from_raw!(item) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let printed_value = print_value(&printable_item, &mut p);
+    if printed_value == 0 {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    }
+    let output_length = p.offset.wrapping_add(1 as crate::__stddef_size_t_h::size_t);
+    let Some(bytes) = p.bytes().get(..output_length as usize) else {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    };
+    let printed = hooks.allocate.expect("non-null function pointer")(
+        bytes.len() as crate::__stddef_size_t_h::size_t
+    ) as *mut ::core::ffi::c_uchar;
+    if printed.is_null() {
+        return ::core::ptr::null_mut::<::core::ffi::c_char>();
+    }
+    ::core::ptr::copy_nonoverlapping(bytes.as_ptr(), printed, bytes.len());
+    return printed as *mut ::core::ffi::c_char;
 }
 #[export_name = "cJSON_PrintPreallocated"]
 
@@ -1674,288 +1771,149 @@ pub unsafe extern "C" fn cJSON_PrintPreallocated_ffi(
     length: ::core::ffi::c_int,
     format: crate::src::cJSON::cJSON_bool,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_PrintPreallocated(item, buffer, length, format)
-}
-unsafe extern "C" fn parse_value(
-    item: *mut crate::src::cJSON::cJSON,
-    input_buffer: *mut parse_buffer,
-) -> crate::src::cJSON::cJSON_bool {
-    if input_buffer.is_null() || (*input_buffer).content.is_null() {
+    if length < 0 as ::core::ffi::c_int || buffer.is_null() {
         return false_0;
     }
-    if !input_buffer.is_null()
-        && (*input_buffer)
-            .offset
-            .wrapping_add(4 as crate::__stddef_size_t_h::size_t)
-            <= (*input_buffer).length
-        && crate::stdlib::strncmp(
-            (*input_buffer)
-                .content
-                .offset((*input_buffer).offset as isize) as *const ::core::ffi::c_char,
-            b"null\0".as_ptr() as *const ::core::ffi::c_char,
-            4 as crate::__stddef_size_t_h::size_t,
-        ) == 0 as ::core::ffi::c_int
-    {
-        (*item).type_0 = crate::src::cJSON::cJSON_NULL;
-        (*input_buffer).offset = (*input_buffer)
+    let output = unsafe {
+        ::core::slice::from_raw_parts_mut(buffer as *mut ::core::ffi::c_uchar, length as usize)
+    };
+    let mut p = printbuffer::borrowed(output, format);
+    match printable_tree_from_raw!(item) {
+        Some(printable_item) => print_value(&printable_item, &mut p),
+        None => false_0,
+    }
+}
+fn parse_value(
+    item: &mut crate::src::cJSON::cJSON,
+    input_buffer: &mut parse_buffer<'_>,
+) -> crate::src::cJSON::cJSON_bool {
+    let content = input_buffer.content;
+    let Some(remaining) = content.get(input_buffer.offset as usize..) else {
+        return false_0;
+    };
+    if remaining.starts_with(b"null") {
+        item.type_0 = crate::src::cJSON::cJSON_NULL;
+        input_buffer.offset = input_buffer
             .offset
             .wrapping_add(4 as crate::__stddef_size_t_h::size_t);
         return true_0;
     }
-    if !input_buffer.is_null()
-        && (*input_buffer)
-            .offset
-            .wrapping_add(5 as crate::__stddef_size_t_h::size_t)
-            <= (*input_buffer).length
-        && crate::stdlib::strncmp(
-            (*input_buffer)
-                .content
-                .offset((*input_buffer).offset as isize) as *const ::core::ffi::c_char,
-            b"false\0".as_ptr() as *const ::core::ffi::c_char,
-            5 as crate::__stddef_size_t_h::size_t,
-        ) == 0 as ::core::ffi::c_int
-    {
-        (*item).type_0 = crate::src::cJSON::cJSON_False;
-        (*input_buffer).offset = (*input_buffer)
+    if remaining.starts_with(b"false") {
+        item.type_0 = crate::src::cJSON::cJSON_False;
+        input_buffer.offset = input_buffer
             .offset
             .wrapping_add(5 as crate::__stddef_size_t_h::size_t);
         return true_0;
     }
-    if !input_buffer.is_null()
-        && (*input_buffer)
-            .offset
-            .wrapping_add(4 as crate::__stddef_size_t_h::size_t)
-            <= (*input_buffer).length
-        && crate::stdlib::strncmp(
-            (*input_buffer)
-                .content
-                .offset((*input_buffer).offset as isize) as *const ::core::ffi::c_char,
-            b"true\0".as_ptr() as *const ::core::ffi::c_char,
-            4 as crate::__stddef_size_t_h::size_t,
-        ) == 0 as ::core::ffi::c_int
-    {
-        (*item).type_0 = crate::src::cJSON::cJSON_True;
-        (*item).valueint = 1 as ::core::ffi::c_int;
-        (*input_buffer).offset = (*input_buffer)
+    if remaining.starts_with(b"true") {
+        item.type_0 = crate::src::cJSON::cJSON_True;
+        item.valueint = 1 as ::core::ffi::c_int;
+        input_buffer.offset = input_buffer
             .offset
             .wrapping_add(4 as crate::__stddef_size_t_h::size_t);
         return true_0;
     }
-    if !input_buffer.is_null()
-        && (*input_buffer)
-            .offset
-            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-            < (*input_buffer).length
-        && *(*input_buffer)
-            .content
-            .offset((*input_buffer).offset as isize)
-            .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == '"' as i32
-    {
-        return parse_string(item, input_buffer);
+
+    let Some(first_byte) = remaining.first().copied() else {
+        return false_0;
+    };
+    if first_byte as ::core::ffi::c_int == '"' as i32 {
+        return parse_string(item, input_buffer, content);
     }
-    if !input_buffer.is_null()
-        && (*input_buffer)
-            .offset
-            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-            < (*input_buffer).length
-        && (*(*input_buffer)
-            .content
-            .offset((*input_buffer).offset as isize)
-            .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == '-' as i32
-            || *(*input_buffer)
-                .content
-                .offset((*input_buffer).offset as isize)
-                .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                >= '0' as i32
-                && *(*input_buffer)
-                    .content
-                    .offset((*input_buffer).offset as isize)
-                    .offset(0 as ::core::ffi::c_int as isize)
-                    as ::core::ffi::c_int
-                    <= '9' as i32)
+    if first_byte as ::core::ffi::c_int == '-' as i32
+        || first_byte as ::core::ffi::c_int >= '0' as i32
+            && first_byte as ::core::ffi::c_int <= '9' as i32
     {
-        return parse_number(item, input_buffer);
+        return parse_number(item, input_buffer, content);
     }
-    if !input_buffer.is_null()
-        && (*input_buffer)
-            .offset
-            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-            < (*input_buffer).length
-        && *(*input_buffer)
-            .content
-            .offset((*input_buffer).offset as isize)
-            .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == '[' as i32
-    {
-        return parse_array(item, input_buffer);
+    if first_byte as ::core::ffi::c_int == '[' as i32 {
+        return parse_array(item, input_buffer, content);
     }
-    if !input_buffer.is_null()
-        && (*input_buffer)
-            .offset
-            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-            < (*input_buffer).length
-        && *(*input_buffer)
-            .content
-            .offset((*input_buffer).offset as isize)
-            .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == '{' as i32
-    {
-        return parse_object(item, input_buffer);
+    if first_byte as ::core::ffi::c_int == '{' as i32 {
+        return parse_object(item, input_buffer, content);
     }
     return false_0;
 }
 
-unsafe extern "C" fn print_value(
-    item: *const crate::src::cJSON::cJSON,
-    output_buffer: *mut printbuffer,
+fn print_value(
+    item: &printable_cjson<'_>,
+    output_buffer: &mut printbuffer<'_>,
 ) -> crate::src::cJSON::cJSON_bool {
-    let mut output: *mut ::core::ffi::c_uchar = ::core::ptr::null_mut::<::core::ffi::c_uchar>();
-    if item.is_null() || output_buffer.is_null() {
-        return false_0;
-    }
-    match (*item).type_0 & 0xff as ::core::ffi::c_int {
-        crate::src::cJSON::cJSON_NULL => {
-            output = ensure(output_buffer, 5 as crate::__stddef_size_t_h::size_t);
-            if output.is_null() {
-                return false_0;
-            }
-            crate::stdlib::strcpy(
-                output as *mut ::core::ffi::c_char,
-                b"null\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return true_0;
+    let bytes = match item.type_0 & 0xff as ::core::ffi::c_int {
+        crate::src::cJSON::cJSON_NULL => b"null\0".as_slice(),
+        crate::src::cJSON::cJSON_False => b"false\0".as_slice(),
+        crate::src::cJSON::cJSON_True => b"true\0".as_slice(),
+        crate::src::cJSON::cJSON_Number => {
+            return print_number(item.valueint, item.valuedouble, Some(output_buffer));
         }
-        crate::src::cJSON::cJSON_False => {
-            output = ensure(output_buffer, 6 as crate::__stddef_size_t_h::size_t);
-            if output.is_null() {
-                return false_0;
+        crate::src::cJSON::cJSON_Raw | crate::src::cJSON::cJSON_String => {
+            if item.type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_String {
+                return print_string_ptr(item.valuestring, Some(output_buffer));
             }
-            crate::stdlib::strcpy(
-                output as *mut ::core::ffi::c_char,
-                b"false\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return true_0;
+            let Some(value_string) = item.valuestring else {
+                return false_0;
+            };
+            value_string.to_bytes_with_nul()
         }
-        crate::src::cJSON::cJSON_True => {
-            output = ensure(output_buffer, 5 as crate::__stddef_size_t_h::size_t);
-            if output.is_null() {
-                return false_0;
-            }
-            crate::stdlib::strcpy(
-                output as *mut ::core::ffi::c_char,
-                b"true\0".as_ptr() as *const ::core::ffi::c_char,
-            );
-            return true_0;
-        }
-        crate::src::cJSON::cJSON_Number => return print_number(item, output_buffer),
-        crate::src::cJSON::cJSON_Raw => {
-            let mut raw_length: crate::__stddef_size_t_h::size_t =
-                0 as crate::__stddef_size_t_h::size_t;
-            if (*item).valuestring.is_null() {
-                return false_0;
-            }
-            raw_length = crate::stdlib::strlen((*item).valuestring)
-                .wrapping_add(::core::mem::size_of::<[::core::ffi::c_char; 1]>()
-                    as crate::__stddef_size_t_h::size_t);
-            output = ensure(output_buffer, raw_length);
-            if output.is_null() {
-                return false_0;
-            }
-            crate::stdlib::memcpy(
-                output as *mut ::core::ffi::c_void,
-                (*item).valuestring as *const ::core::ffi::c_void,
-                raw_length,
-            );
-            return true_0;
-        }
-        crate::src::cJSON::cJSON_String => return print_string(item, output_buffer),
         crate::src::cJSON::cJSON_Array => return print_array(item, output_buffer),
         crate::src::cJSON::cJSON_Object => return print_object(item, output_buffer),
         _ => return false_0,
     };
+    let Some(output) = ensure(
+        Some(&mut *output_buffer),
+        bytes.len() as crate::__stddef_size_t_h::size_t,
+    ) else {
+        return false_0;
+    };
+    output.copy_from_slice(bytes);
+    output_buffer.offset = output_buffer
+        .offset
+        .wrapping_add(bytes.len().wrapping_sub(1) as crate::__stddef_size_t_h::size_t);
+    return true_0;
 }
 
-unsafe extern "C" fn parse_array(
-    item: *mut crate::src::cJSON::cJSON,
-    input_buffer: *mut parse_buffer,
+fn parse_array(
+    item: &mut crate::src::cJSON::cJSON,
+    input_buffer: &mut parse_buffer<'_>,
+    content: &[::core::ffi::c_uchar],
 ) -> crate::src::cJSON::cJSON_bool {
     let mut c2rust_current_block: u64;
-    let mut head: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    let mut current_item: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    if (*input_buffer).depth
+    let mut parsed_children: Vec<&mut crate::src::cJSON::cJSON> = Vec::new();
+    if input_buffer.depth
         >= crate::src::cJSON::CJSON_NESTING_LIMIT as crate::__stddef_size_t_h::size_t
     {
         return false_0;
     }
-    (*input_buffer).depth = (*input_buffer).depth.wrapping_add(1);
-    if !(*(*input_buffer)
-        .content
-        .offset((*input_buffer).offset as isize)
-        .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-        != '[' as i32)
-    {
-        (*input_buffer).offset = (*input_buffer).offset.wrapping_add(1);
-        buffer_skip_whitespace(input_buffer);
-        if !input_buffer.is_null()
-            && (*input_buffer)
-                .offset
-                .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-                < (*input_buffer).length
-            && *(*input_buffer)
-                .content
-                .offset((*input_buffer).offset as isize)
-                .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                == ']' as i32
-        {
+    input_buffer.depth = input_buffer.depth.wrapping_add(1);
+    if content.get(input_buffer.offset as usize) == Some(&b'[') {
+        input_buffer.offset = input_buffer.offset.wrapping_add(1);
+        buffer_skip_whitespace(Some(&mut *input_buffer));
+        if content.get(input_buffer.offset as usize) == Some(&b']') {
             c2rust_current_block = 6773356538935231690;
-        } else if !(!input_buffer.is_null()
-            && (*input_buffer)
-                .offset
-                .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-                < (*input_buffer).length)
+        } else if !(input_buffer
+            .offset
+            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
+            < input_buffer.length)
         {
-            (*input_buffer).offset = (*input_buffer).offset.wrapping_sub(1);
+            input_buffer.offset = input_buffer.offset.wrapping_sub(1);
             c2rust_current_block = 1336238348363633231;
         } else {
-            (*input_buffer).offset = (*input_buffer).offset.wrapping_sub(1);
+            input_buffer.offset = input_buffer.offset.wrapping_sub(1);
             loop {
-                let mut new_item: *mut crate::src::cJSON::cJSON =
-                    cJSON_New_Item(&raw mut (*input_buffer).hooks);
-                if new_item.is_null() {
+                let Some(new_item_ref) = cJSON_New_Item(&input_buffer.hooks) else {
+                    c2rust_current_block = 1336238348363633231;
+                    break;
+                };
+                input_buffer.offset = input_buffer.offset.wrapping_add(1);
+                buffer_skip_whitespace(Some(&mut *input_buffer));
+                let parsed_value = parse_value(new_item_ref, input_buffer);
+                parsed_children.push(new_item_ref);
+                if parsed_value == 0 {
                     c2rust_current_block = 1336238348363633231;
                     break;
                 }
-                if head.is_null() {
-                    head = new_item;
-                    current_item = head;
-                } else {
-                    (*current_item).next = new_item as *mut crate::src::cJSON::cJSON;
-                    (*new_item).prev = current_item as *mut crate::src::cJSON::cJSON;
-                    current_item = new_item;
-                }
-                (*input_buffer).offset = (*input_buffer).offset.wrapping_add(1);
-                buffer_skip_whitespace(input_buffer);
-                if parse_value(current_item, input_buffer) == 0 {
-                    c2rust_current_block = 1336238348363633231;
-                    break;
-                }
-                buffer_skip_whitespace(input_buffer);
-                if !(!input_buffer.is_null()
-                    && (*input_buffer)
-                        .offset
-                        .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-                        < (*input_buffer).length
-                    && *(*input_buffer)
-                        .content
-                        .offset((*input_buffer).offset as isize)
-                        .offset(0 as ::core::ffi::c_int as isize)
-                        as ::core::ffi::c_int
-                        == ',' as i32)
-                {
+                buffer_skip_whitespace(Some(&mut *input_buffer));
+                if content.get(input_buffer.offset as usize) != Some(&b',') {
                     c2rust_current_block = 15089075282327824602;
                     break;
                 }
@@ -1963,18 +1921,7 @@ unsafe extern "C" fn parse_array(
             match c2rust_current_block {
                 1336238348363633231 => {}
                 _ => {
-                    if !(!input_buffer.is_null()
-                        && (*input_buffer)
-                            .offset
-                            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-                            < (*input_buffer).length)
-                        || *(*input_buffer)
-                            .content
-                            .offset((*input_buffer).offset as isize)
-                            .offset(0 as ::core::ffi::c_int as isize)
-                            as ::core::ffi::c_int
-                            != ']' as i32
-                    {
+                    if content.get(input_buffer.offset as usize) != Some(&b']') {
                         c2rust_current_block = 1336238348363633231;
                     } else {
                         c2rust_current_block = 6773356538935231690;
@@ -1985,203 +1932,134 @@ unsafe extern "C" fn parse_array(
         match c2rust_current_block {
             1336238348363633231 => {}
             _ => {
-                (*input_buffer).depth = (*input_buffer).depth.wrapping_sub(1);
-                if !head.is_null() {
-                    (*head).prev = current_item as *mut crate::src::cJSON::cJSON;
-                }
-                (*item).type_0 = crate::src::cJSON::cJSON_Array;
-                (*item).child = head as *mut crate::src::cJSON::cJSON;
-                (*input_buffer).offset = (*input_buffer).offset.wrapping_add(1);
+                input_buffer.depth = input_buffer.depth.wrapping_sub(1);
+                item.type_0 = crate::src::cJSON::cJSON_Array;
+                assign_linked_children(item, &mut parsed_children);
+                input_buffer.offset = input_buffer.offset.wrapping_add(1);
                 return true_0;
             }
         }
     }
-    if !head.is_null() {
-        cJSON_Delete(head);
-    }
+    assign_linked_children(item, &mut parsed_children);
     return false_0;
 }
 
-unsafe extern "C" fn print_array(
-    item: *const crate::src::cJSON::cJSON,
-    output_buffer: *mut printbuffer,
+fn print_array(
+    item: &printable_cjson<'_>,
+    output_buffer: &mut printbuffer<'_>,
 ) -> crate::src::cJSON::cJSON_bool {
-    let mut output_pointer: *mut ::core::ffi::c_uchar =
-        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut length: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
-    let mut current_element: *mut crate::src::cJSON::cJSON =
-        (*item).child as *mut crate::src::cJSON::cJSON;
-    if output_buffer.is_null() {
+    let Some(output) = ensure(
+        Some(&mut *output_buffer),
+        1 as crate::__stddef_size_t_h::size_t,
+    ) else {
         return false_0;
-    }
-    output_pointer = ensure(output_buffer, 1 as crate::__stddef_size_t_h::size_t);
-    if output_pointer.is_null() {
-        return false_0;
-    }
-    *output_pointer = '[' as i32 as ::core::ffi::c_uchar;
-    (*output_buffer).offset = (*output_buffer).offset.wrapping_add(1);
-    (*output_buffer).depth = (*output_buffer).depth.wrapping_add(1);
-    while !current_element.is_null() {
+    };
+    output[0] = b'[';
+    output_buffer.offset = output_buffer.offset.wrapping_add(1);
+    output_buffer.depth = output_buffer.depth.wrapping_add(1);
+    for (index, current_element) in item.children.iter().enumerate() {
         if print_value(current_element, output_buffer) == 0 {
             return false_0;
         }
-        update_offset(output_buffer);
-        if !(*current_element).next.is_null() {
-            length = (if (*output_buffer).format != 0 {
+        if index + 1 < item.children.len() {
+            let formatted = output_buffer.format != 0;
+            length = (if formatted {
                 2 as ::core::ffi::c_int
             } else {
                 1 as ::core::ffi::c_int
             }) as crate::__stddef_size_t_h::size_t;
-            output_pointer = ensure(
-                output_buffer,
+            let Some(output) = ensure(
+                Some(&mut *output_buffer),
                 length.wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-            );
-            if output_pointer.is_null() {
+            ) else {
                 return false_0;
+            };
+            output[0] = b',';
+            if formatted {
+                output[1] = b' ';
             }
-            let c2rust_fresh22 = output_pointer;
-            output_pointer = output_pointer.offset(1);
-            *c2rust_fresh22 = ',' as i32 as ::core::ffi::c_uchar;
-            if (*output_buffer).format != 0 {
-                let c2rust_fresh23 = output_pointer;
-                output_pointer = output_pointer.offset(1);
-                *c2rust_fresh23 = ' ' as i32 as ::core::ffi::c_uchar;
-            }
-            *output_pointer = '\0' as i32 as ::core::ffi::c_uchar;
-            (*output_buffer).offset = (*output_buffer).offset.wrapping_add(length);
+            output[length as usize] = b'\0';
+            output_buffer.offset = output_buffer.offset.wrapping_add(length);
         }
-        current_element = (*current_element).next as *mut crate::src::cJSON::cJSON;
     }
-    output_pointer = ensure(output_buffer, 2 as crate::__stddef_size_t_h::size_t);
-    if output_pointer.is_null() {
+    let Some(output) = ensure(
+        Some(&mut *output_buffer),
+        2 as crate::__stddef_size_t_h::size_t,
+    ) else {
         return false_0;
-    }
-    let c2rust_fresh24 = output_pointer;
-    output_pointer = output_pointer.offset(1);
-    *c2rust_fresh24 = ']' as i32 as ::core::ffi::c_uchar;
-    *output_pointer = '\0' as i32 as ::core::ffi::c_uchar;
-    (*output_buffer).depth = (*output_buffer).depth.wrapping_sub(1);
+    };
+    output[0] = b']';
+    output[1] = b'\0';
+    output_buffer.offset = output_buffer.offset.wrapping_add(1);
+    output_buffer.depth = output_buffer.depth.wrapping_sub(1);
     return true_0;
 }
 
-unsafe extern "C" fn parse_object(
-    item: *mut crate::src::cJSON::cJSON,
-    input_buffer: *mut parse_buffer,
+fn parse_object(
+    item: &mut crate::src::cJSON::cJSON,
+    input_buffer: &mut parse_buffer<'_>,
+    content: &[::core::ffi::c_uchar],
 ) -> crate::src::cJSON::cJSON_bool {
     let mut c2rust_current_block: u64;
-    let mut head: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    let mut current_item: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    if (*input_buffer).depth
+    let mut parsed_children: Vec<&mut crate::src::cJSON::cJSON> = Vec::new();
+    if input_buffer.depth
         >= crate::src::cJSON::CJSON_NESTING_LIMIT as crate::__stddef_size_t_h::size_t
     {
         return false_0;
     }
-    (*input_buffer).depth = (*input_buffer).depth.wrapping_add(1);
-    if !(!(!input_buffer.is_null()
-        && (*input_buffer)
+    input_buffer.depth = input_buffer.depth.wrapping_add(1);
+    if content.get(input_buffer.offset as usize) == Some(&b'{') {
+        input_buffer.offset = input_buffer.offset.wrapping_add(1);
+        buffer_skip_whitespace(Some(&mut *input_buffer));
+        if content.get(input_buffer.offset as usize) == Some(&b'}') {
+            c2rust_current_block = 4359236900545362719;
+        } else if !(input_buffer
             .offset
             .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-            < (*input_buffer).length)
-        || *(*input_buffer)
-            .content
-            .offset((*input_buffer).offset as isize)
-            .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            != '{' as i32)
-    {
-        (*input_buffer).offset = (*input_buffer).offset.wrapping_add(1);
-        buffer_skip_whitespace(input_buffer);
-        if !input_buffer.is_null()
-            && (*input_buffer)
-                .offset
-                .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-                < (*input_buffer).length
-            && *(*input_buffer)
-                .content
-                .offset((*input_buffer).offset as isize)
-                .offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                == '}' as i32
+            < input_buffer.length)
         {
-            c2rust_current_block = 4359236900545362719;
-        } else if !(!input_buffer.is_null()
-            && (*input_buffer)
-                .offset
-                .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-                < (*input_buffer).length)
-        {
-            (*input_buffer).offset = (*input_buffer).offset.wrapping_sub(1);
+            input_buffer.offset = input_buffer.offset.wrapping_sub(1);
             c2rust_current_block = 9990476168629568694;
         } else {
-            (*input_buffer).offset = (*input_buffer).offset.wrapping_sub(1);
+            input_buffer.offset = input_buffer.offset.wrapping_sub(1);
             loop {
-                let mut new_item: *mut crate::src::cJSON::cJSON =
-                    cJSON_New_Item(&raw mut (*input_buffer).hooks);
-                if new_item.is_null() {
-                    c2rust_current_block = 9990476168629568694;
-                    break;
-                } else {
-                    if head.is_null() {
-                        head = new_item;
-                        current_item = head;
-                    } else {
-                        (*current_item).next = new_item as *mut crate::src::cJSON::cJSON;
-                        (*new_item).prev = current_item as *mut crate::src::cJSON::cJSON;
-                        current_item = new_item;
-                    }
-                    if !(!input_buffer.is_null()
-                        && (*input_buffer)
-                            .offset
-                            .wrapping_add(1 as crate::__stddef_size_t_h::size_t)
-                            < (*input_buffer).length)
+                if let Some(current_item_ref) = cJSON_New_Item(&input_buffer.hooks) {
+                    if !(input_buffer
+                        .offset
+                        .wrapping_add(1 as crate::__stddef_size_t_h::size_t)
+                        < input_buffer.length)
                     {
+                        parsed_children.push(current_item_ref);
                         c2rust_current_block = 9990476168629568694;
                         break;
                     } else {
-                        (*input_buffer).offset = (*input_buffer).offset.wrapping_add(1);
-                        buffer_skip_whitespace(input_buffer);
-                        if parse_string(current_item, input_buffer) == 0 {
+                        input_buffer.offset = input_buffer.offset.wrapping_add(1);
+                        buffer_skip_whitespace(Some(&mut *input_buffer));
+                        if parse_string(current_item_ref, input_buffer, content) == 0 {
+                            parsed_children.push(current_item_ref);
                             c2rust_current_block = 9990476168629568694;
                             break;
                         } else {
-                            buffer_skip_whitespace(input_buffer);
-                            (*current_item).string = (*current_item).valuestring;
-                            (*current_item).valuestring =
+                            buffer_skip_whitespace(Some(&mut *input_buffer));
+                            current_item_ref.string = current_item_ref.valuestring;
+                            current_item_ref.valuestring =
                                 ::core::ptr::null_mut::<::core::ffi::c_char>();
-                            if !(!input_buffer.is_null()
-                                && (*input_buffer)
-                                    .offset
-                                    .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-                                    < (*input_buffer).length)
-                                || *(*input_buffer)
-                                    .content
-                                    .offset((*input_buffer).offset as isize)
-                                    .offset(0 as ::core::ffi::c_int as isize)
-                                    as ::core::ffi::c_int
-                                    != ':' as i32
-                            {
+                            if content.get(input_buffer.offset as usize) != Some(&b':') {
+                                parsed_children.push(current_item_ref);
                                 c2rust_current_block = 9990476168629568694;
                                 break;
                             } else {
-                                (*input_buffer).offset = (*input_buffer).offset.wrapping_add(1);
-                                buffer_skip_whitespace(input_buffer);
-                                if parse_value(current_item, input_buffer) == 0 {
+                                input_buffer.offset = input_buffer.offset.wrapping_add(1);
+                                buffer_skip_whitespace(Some(&mut *input_buffer));
+                                if parse_value(current_item_ref, input_buffer) == 0 {
+                                    parsed_children.push(current_item_ref);
                                     c2rust_current_block = 9990476168629568694;
                                     break;
                                 } else {
-                                    buffer_skip_whitespace(input_buffer);
-                                    if !(!input_buffer.is_null()
-                                        && (*input_buffer)
-                                            .offset
-                                            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-                                            < (*input_buffer).length
-                                        && *(*input_buffer)
-                                            .content
-                                            .offset((*input_buffer).offset as isize)
-                                            .offset(0 as ::core::ffi::c_int as isize)
-                                            as ::core::ffi::c_int
-                                            == ',' as i32)
-                                    {
+                                    buffer_skip_whitespace(Some(&mut *input_buffer));
+                                    parsed_children.push(current_item_ref);
+                                    if content.get(input_buffer.offset as usize) != Some(&b',') {
                                         c2rust_current_block = 14359455889292382949;
                                         break;
                                     }
@@ -2189,23 +2067,15 @@ unsafe extern "C" fn parse_object(
                             }
                         }
                     }
+                } else {
+                    c2rust_current_block = 9990476168629568694;
+                    break;
                 }
             }
             match c2rust_current_block {
                 9990476168629568694 => {}
                 _ => {
-                    if !(!input_buffer.is_null()
-                        && (*input_buffer)
-                            .offset
-                            .wrapping_add(0 as crate::__stddef_size_t_h::size_t)
-                            < (*input_buffer).length)
-                        || *(*input_buffer)
-                            .content
-                            .offset((*input_buffer).offset as isize)
-                            .offset(0 as ::core::ffi::c_int as isize)
-                            as ::core::ffi::c_int
-                            != '}' as i32
-                    {
+                    if content.get(input_buffer.offset as usize) != Some(&b'}') {
                         c2rust_current_block = 9990476168629568694;
                     } else {
                         c2rust_current_block = 4359236900545362719;
@@ -2216,171 +2086,145 @@ unsafe extern "C" fn parse_object(
         match c2rust_current_block {
             9990476168629568694 => {}
             _ => {
-                (*input_buffer).depth = (*input_buffer).depth.wrapping_sub(1);
-                if !head.is_null() {
-                    (*head).prev = current_item as *mut crate::src::cJSON::cJSON;
-                }
-                (*item).type_0 = crate::src::cJSON::cJSON_Object;
-                (*item).child = head as *mut crate::src::cJSON::cJSON;
-                (*input_buffer).offset = (*input_buffer).offset.wrapping_add(1);
+                input_buffer.depth = input_buffer.depth.wrapping_sub(1);
+                item.type_0 = crate::src::cJSON::cJSON_Object;
+                assign_linked_children(item, &mut parsed_children);
+                input_buffer.offset = input_buffer.offset.wrapping_add(1);
                 return true_0;
             }
         }
     }
-    if !head.is_null() {
-        cJSON_Delete(head);
-    }
+    assign_linked_children(item, &mut parsed_children);
     return false_0;
 }
 
-unsafe extern "C" fn print_object(
-    item: *const crate::src::cJSON::cJSON,
-    output_buffer: *mut printbuffer,
+fn print_object(
+    item: &printable_cjson<'_>,
+    output_buffer: &mut printbuffer<'_>,
 ) -> crate::src::cJSON::cJSON_bool {
-    let mut output_pointer: *mut ::core::ffi::c_uchar =
-        ::core::ptr::null_mut::<::core::ffi::c_uchar>();
     let mut length: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
-    let mut current_item: *mut crate::src::cJSON::cJSON =
-        (*item).child as *mut crate::src::cJSON::cJSON;
-    if output_buffer.is_null() {
-        return false_0;
-    }
-    length = (if (*output_buffer).format != 0 {
+    length = (if output_buffer.format != 0 {
         2 as ::core::ffi::c_int
     } else {
         1 as ::core::ffi::c_int
     }) as crate::__stddef_size_t_h::size_t;
-    output_pointer = ensure(
-        output_buffer,
-        length.wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-    );
-    if output_pointer.is_null() {
-        return false_0;
+    {
+        let formatted = output_buffer.format != 0;
+        let Some(output) = ensure(
+            Some(&mut *output_buffer),
+            length.wrapping_add(1 as crate::__stddef_size_t_h::size_t),
+        ) else {
+            return false_0;
+        };
+        output[0] = b'{';
+        if formatted {
+            output[1] = b'\n';
+        }
     }
-    let c2rust_fresh12 = output_pointer;
-    output_pointer = output_pointer.offset(1);
-    *c2rust_fresh12 = '{' as i32 as ::core::ffi::c_uchar;
-    (*output_buffer).depth = (*output_buffer).depth.wrapping_add(1);
-    if (*output_buffer).format != 0 {
-        let c2rust_fresh13 = output_pointer;
-        output_pointer = output_pointer.offset(1);
-        *c2rust_fresh13 = '\n' as i32 as ::core::ffi::c_uchar;
-    }
-    (*output_buffer).offset = (*output_buffer).offset.wrapping_add(length);
-    while !current_item.is_null() {
-        if (*output_buffer).format != 0 {
+    output_buffer.depth = output_buffer.depth.wrapping_add(1);
+    output_buffer.offset = output_buffer.offset.wrapping_add(length);
+    for (index, current_item) in item.children.iter().enumerate() {
+        if output_buffer.format != 0 {
             let mut i: crate::__stddef_size_t_h::size_t = 0;
-            output_pointer = ensure(output_buffer, (*output_buffer).depth);
-            if output_pointer.is_null() {
+            let depth = output_buffer.depth;
+            let Some(output) = ensure(Some(&mut *output_buffer), depth) else {
                 return false_0;
-            }
+            };
             i = 0 as crate::__stddef_size_t_h::size_t;
-            while i < (*output_buffer).depth {
-                let c2rust_fresh14 = output_pointer;
-                output_pointer = output_pointer.offset(1);
-                *c2rust_fresh14 = '\t' as i32 as ::core::ffi::c_uchar;
+            while i < depth {
+                output[i as usize] = b'\t';
                 i = i.wrapping_add(1);
             }
-            (*output_buffer).offset = (*output_buffer).offset.wrapping_add((*output_buffer).depth);
+            output_buffer.offset = output_buffer.offset.wrapping_add(depth);
         }
-        if print_string_ptr(
-            (*current_item).string as *mut ::core::ffi::c_uchar,
-            output_buffer,
-        ) == 0
-        {
+        if print_string_ptr(current_item.string, Some(&mut *output_buffer)) == 0 {
             return false_0;
         }
-        update_offset(output_buffer);
-        length = (if (*output_buffer).format != 0 {
+        let formatted = output_buffer.format != 0;
+        length = (if formatted {
             2 as ::core::ffi::c_int
         } else {
             1 as ::core::ffi::c_int
         }) as crate::__stddef_size_t_h::size_t;
-        output_pointer = ensure(output_buffer, length);
-        if output_pointer.is_null() {
+        let Some(output) = ensure(Some(&mut *output_buffer), length) else {
             return false_0;
+        };
+        output[0] = b':';
+        if formatted {
+            output[1] = b'\t';
         }
-        let c2rust_fresh15 = output_pointer;
-        output_pointer = output_pointer.offset(1);
-        *c2rust_fresh15 = ':' as i32 as ::core::ffi::c_uchar;
-        if (*output_buffer).format != 0 {
-            let c2rust_fresh16 = output_pointer;
-            output_pointer = output_pointer.offset(1);
-            *c2rust_fresh16 = '\t' as i32 as ::core::ffi::c_uchar;
-        }
-        (*output_buffer).offset = (*output_buffer).offset.wrapping_add(length);
+        output_buffer.offset = output_buffer.offset.wrapping_add(length);
         if print_value(current_item, output_buffer) == 0 {
             return false_0;
         }
-        update_offset(output_buffer);
-        length = ((if (*output_buffer).format != 0 {
+        let formatted = output_buffer.format != 0;
+        let has_next = index + 1 < item.children.len();
+        length = ((if formatted {
             1 as ::core::ffi::c_int
         } else {
             0 as ::core::ffi::c_int
         }) as crate::__stddef_size_t_h::size_t)
             .wrapping_add(
-                (if !(*current_item).next.is_null() {
+                (if has_next {
                     1 as ::core::ffi::c_int
                 } else {
                     0 as ::core::ffi::c_int
                 }) as crate::__stddef_size_t_h::size_t,
             );
-        output_pointer = ensure(
-            output_buffer,
+        let Some(output) = ensure(
+            Some(&mut *output_buffer),
             length.wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-        );
-        if output_pointer.is_null() {
+        ) else {
             return false_0;
+        };
+        let mut output_index = 0usize;
+        if has_next {
+            output[output_index] = b',';
+            output_index = output_index.wrapping_add(1);
         }
-        if !(*current_item).next.is_null() {
-            let c2rust_fresh17 = output_pointer;
-            output_pointer = output_pointer.offset(1);
-            *c2rust_fresh17 = ',' as i32 as ::core::ffi::c_uchar;
+        if formatted {
+            output[output_index] = b'\n';
+            output_index = output_index.wrapping_add(1);
         }
-        if (*output_buffer).format != 0 {
-            let c2rust_fresh18 = output_pointer;
-            output_pointer = output_pointer.offset(1);
-            *c2rust_fresh18 = '\n' as i32 as ::core::ffi::c_uchar;
-        }
-        *output_pointer = '\0' as i32 as ::core::ffi::c_uchar;
-        (*output_buffer).offset = (*output_buffer).offset.wrapping_add(length);
-        current_item = (*current_item).next as *mut crate::src::cJSON::cJSON;
+        output[output_index] = b'\0';
+        output_buffer.offset = output_buffer.offset.wrapping_add(length);
     }
-    output_pointer = ensure(
-        output_buffer,
-        if (*output_buffer).format != 0 {
-            (*output_buffer)
-                .depth
-                .wrapping_add(1 as crate::__stddef_size_t_h::size_t)
-        } else {
-            2 as crate::__stddef_size_t_h::size_t
-        },
-    );
-    if output_pointer.is_null() {
+    let formatted = output_buffer.format != 0;
+    let closing_length = if formatted {
+        output_buffer
+            .depth
+            .wrapping_add(1 as crate::__stddef_size_t_h::size_t)
+    } else {
+        2 as crate::__stddef_size_t_h::size_t
+    };
+    let closing_depth = output_buffer
+        .depth
+        .wrapping_sub(1 as crate::__stddef_size_t_h::size_t);
+    let Some(output) = ensure(Some(&mut *output_buffer), closing_length) else {
         return false_0;
-    }
-    if (*output_buffer).format != 0 {
+    };
+    let mut output_index = 0usize;
+    if formatted {
         let mut i_0: crate::__stddef_size_t_h::size_t = 0;
         i_0 = 0 as crate::__stddef_size_t_h::size_t;
-        while i_0
-            < (*output_buffer)
-                .depth
-                .wrapping_sub(1 as crate::__stddef_size_t_h::size_t)
-        {
-            let c2rust_fresh19 = output_pointer;
-            output_pointer = output_pointer.offset(1);
-            *c2rust_fresh19 = '\t' as i32 as ::core::ffi::c_uchar;
+        while i_0 < closing_depth {
+            output[output_index] = b'\t';
+            output_index = output_index.wrapping_add(1);
             i_0 = i_0.wrapping_add(1);
         }
     }
-    let c2rust_fresh20 = output_pointer;
-    output_pointer = output_pointer.offset(1);
-    *c2rust_fresh20 = '}' as i32 as ::core::ffi::c_uchar;
-    *output_pointer = '\0' as i32 as ::core::ffi::c_uchar;
-    (*output_buffer).depth = (*output_buffer).depth.wrapping_sub(1);
+    output[output_index] = b'}';
+    output_index = output_index.wrapping_add(1);
+    output[output_index] = b'\0';
+    output_buffer.offset = output_buffer
+        .offset
+        .wrapping_add(closing_length.wrapping_sub(1));
+    output_buffer.depth = output_buffer.depth.wrapping_sub(1);
     return true_0;
 }
-pub unsafe extern "C" fn cJSON_GetArraySize(
+#[export_name = "cJSON_GetArraySize"]
+
+pub unsafe extern "C" fn cJSON_GetArraySize_ffi(
     mut array: *const crate::src::cJSON::cJSON,
 ) -> ::core::ffi::c_int {
     let mut child: *mut crate::src::cJSON::cJSON =
@@ -2396,84 +2240,75 @@ pub unsafe extern "C" fn cJSON_GetArraySize(
     }
     return size as ::core::ffi::c_int;
 }
-#[export_name = "cJSON_GetArraySize"]
-
-pub unsafe extern "C" fn cJSON_GetArraySize_ffi(
-    mut array: *const crate::src::cJSON::cJSON,
-) -> ::core::ffi::c_int {
-    cJSON_GetArraySize(array)
-}
-unsafe extern "C" fn get_array_item(
-    mut array: *const crate::src::cJSON::cJSON,
-    mut index: crate::__stddef_size_t_h::size_t,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut current_child: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    if array.is_null() {
-        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    }
-    current_child = (*array).child as *mut crate::src::cJSON::cJSON;
-    while !current_child.is_null() && index > 0 as crate::__stddef_size_t_h::size_t {
-        index = index.wrapping_sub(1);
-        current_child = (*current_child).next as *mut crate::src::cJSON::cJSON;
-    }
-    return current_child;
-}
-pub unsafe extern "C" fn cJSON_GetArrayItem(
-    mut array: *const crate::src::cJSON::cJSON,
-    mut index: ::core::ffi::c_int,
-) -> *mut crate::src::cJSON::cJSON {
-    if index < 0 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    }
-    return get_array_item(array, index as crate::__stddef_size_t_h::size_t);
-}
 #[export_name = "cJSON_GetArrayItem"]
 
 pub unsafe extern "C" fn cJSON_GetArrayItem_ffi(
     mut array: *const crate::src::cJSON::cJSON,
     mut index: ::core::ffi::c_int,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_GetArrayItem(array, index)
-}
-unsafe extern "C" fn get_object_item(
-    object: *const crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-    case_sensitive: crate::src::cJSON::cJSON_bool,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut current_element: *mut crate::src::cJSON::cJSON =
+    let mut current_child: *mut crate::src::cJSON::cJSON =
         ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    if object.is_null() || name.is_null() {
+    if index < 0 as ::core::ffi::c_int {
         return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     }
-    current_element = (*object).child as *mut crate::src::cJSON::cJSON;
-    if case_sensitive != 0 {
-        while !current_element.is_null()
-            && !(*current_element).string.is_null()
-            && crate::stdlib::strcmp(name, (*current_element).string) != 0 as ::core::ffi::c_int
-        {
-            current_element = (*current_element).next as *mut crate::src::cJSON::cJSON;
-        }
-    } else {
-        while !current_element.is_null()
-            && case_insensitive_strcmp(
-                name as *const ::core::ffi::c_uchar,
-                (*current_element).string as *const ::core::ffi::c_uchar,
-            ) != 0 as ::core::ffi::c_int
-        {
-            current_element = (*current_element).next as *mut crate::src::cJSON::cJSON;
-        }
-    }
-    if current_element.is_null() || (*current_element).string.is_null() {
+    if array.is_null() {
         return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     }
-    return current_element;
+    current_child = (*array).child as *mut crate::src::cJSON::cJSON;
+    let mut index = index as crate::__stddef_size_t_h::size_t;
+    while !current_child.is_null() && index > 0 as crate::__stddef_size_t_h::size_t {
+        index = index.wrapping_sub(1);
+        current_child = (*current_child).next as *mut crate::src::cJSON::cJSON;
+    }
+    return current_child;
 }
-pub unsafe extern "C" fn cJSON_GetObjectItem(
-    object: *const crate::src::cJSON::cJSON,
-    string: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    return get_object_item(object, string, false_0);
+fn object_item_name_match(
+    name: &::std::ffi::CStr,
+    current_name: Option<&::std::ffi::CStr>,
+    case_sensitive: crate::src::cJSON::cJSON_bool,
+) -> Option<bool> {
+    let Some(current_name) = current_name else {
+        if case_sensitive != 0 {
+            return None;
+        }
+        return Some(false);
+    };
+    if case_sensitive != 0 {
+        Some(name == current_name)
+    } else {
+        Some(case_insensitive_strcmp(Some(name), Some(current_name)) == 0 as ::core::ffi::c_int)
+    }
+}
+
+macro_rules! get_object_item_from_raw {
+    ($object:expr, $name:expr, $case_sensitive:expr) => {{
+        'lookup: {
+            let Some(name) = $name else {
+                break 'lookup ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+            };
+            let Some(object) = (unsafe { ($object).as_ref() }) else {
+                break 'lookup ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+            };
+            let mut current_element = object.child;
+            while let Some(element_ref) = unsafe { current_element.as_ref() } {
+                let current_name = if element_ref.string.is_null() {
+                    None
+                } else {
+                    Some(unsafe { ::std::ffi::CStr::from_ptr(element_ref.string) })
+                };
+                match object_item_name_match(name, current_name, $case_sensitive) {
+                    Some(true) => {
+                        break 'lookup element_ref as *const crate::src::cJSON::cJSON
+                            as *mut crate::src::cJSON::cJSON;
+                    }
+                    Some(false) => {}
+                    None => break,
+                }
+                current_element = element_ref.next;
+            }
+            ::core::ptr::null_mut::<crate::src::cJSON::cJSON>()
+        }
+    }};
 }
 #[export_name = "cJSON_GetObjectItem"]
 
@@ -2481,13 +2316,12 @@ pub unsafe extern "C" fn cJSON_GetObjectItem_ffi(
     object: *const crate::src::cJSON::cJSON,
     string: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_GetObjectItem(object, string)
-}
-pub unsafe extern "C" fn cJSON_GetObjectItemCaseSensitive(
-    object: *const crate::src::cJSON::cJSON,
-    string: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    return get_object_item(object, string, true_0);
+    let name = if string.is_null() {
+        None
+    } else {
+        Some(unsafe { ::std::ffi::CStr::from_ptr(string) })
+    };
+    get_object_item_from_raw!(object, name, false_0)
 }
 #[export_name = "cJSON_GetObjectItemCaseSensitive"]
 
@@ -2495,17 +2329,12 @@ pub unsafe extern "C" fn cJSON_GetObjectItemCaseSensitive_ffi(
     object: *const crate::src::cJSON::cJSON,
     string: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_GetObjectItemCaseSensitive(object, string)
-}
-pub unsafe extern "C" fn cJSON_HasObjectItem(
-    mut object: *const crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-) -> crate::src::cJSON::cJSON_bool {
-    return if !cJSON_GetObjectItem(object, string).is_null() {
-        1 as crate::src::cJSON::cJSON_bool
+    let name = if string.is_null() {
+        None
     } else {
-        0 as crate::src::cJSON::cJSON_bool
+        Some(unsafe { ::std::ffi::CStr::from_ptr(string) })
     };
+    get_object_item_from_raw!(object, name, true_0)
 }
 #[export_name = "cJSON_HasObjectItem"]
 
@@ -2513,66 +2342,119 @@ pub unsafe extern "C" fn cJSON_HasObjectItem_ffi(
     mut object: *const crate::src::cJSON::cJSON,
     mut string: *const ::core::ffi::c_char,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_HasObjectItem(object, string)
+    let name = if string.is_null() {
+        None
+    } else {
+        Some(unsafe { ::std::ffi::CStr::from_ptr(string) })
+    };
+    return if !get_object_item_from_raw!(object, name, false_0).is_null() {
+        1 as crate::src::cJSON::cJSON_bool
+    } else {
+        0 as crate::src::cJSON::cJSON_bool
+    };
 }
-unsafe extern "C" fn suffix_object(
-    mut prev: *mut crate::src::cJSON::cJSON,
-    mut item: *mut crate::src::cJSON::cJSON,
+fn suffix_object(prev: &mut crate::src::cJSON::cJSON, item: &mut crate::src::cJSON::cJSON) {
+    prev.next = item as *mut crate::src::cJSON::cJSON;
+    item.prev = prev as *mut crate::src::cJSON::cJSON;
+}
+
+fn assign_linked_children(
+    parent: &mut crate::src::cJSON::cJSON,
+    children: &mut [&mut crate::src::cJSON::cJSON],
 ) {
-    (*prev).next = item as *mut crate::src::cJSON::cJSON;
-    (*item).prev = prev as *mut crate::src::cJSON::cJSON;
+    if children.is_empty() {
+        parent.child = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+        return;
+    }
+
+    let mut child_ptrs: Vec<*mut crate::src::cJSON::cJSON> = Vec::with_capacity(children.len());
+    for child in children.iter_mut() {
+        child_ptrs.push(*child as *mut crate::src::cJSON::cJSON);
+    }
+    let last_index = child_ptrs.len() - 1;
+    for (index, child) in children.iter_mut().enumerate() {
+        child.prev = if index == 0 {
+            child_ptrs[last_index]
+        } else {
+            child_ptrs[index - 1]
+        };
+        child.next = if index == last_index {
+            ::core::ptr::null_mut::<crate::src::cJSON::cJSON>()
+        } else {
+            child_ptrs[index + 1]
+        };
+    }
+    parent.child = child_ptrs[0];
 }
 
-unsafe extern "C" fn create_reference(
-    mut item: *const crate::src::cJSON::cJSON,
-    hooks: *const internal_hooks,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut reference: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    if item.is_null() {
-        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    }
-    reference = cJSON_New_Item(hooks);
-    if reference.is_null() {
-        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    }
-    crate::stdlib::memcpy(
-        reference as *mut ::core::ffi::c_void,
-        item as *const ::core::ffi::c_void,
-        ::core::mem::size_of::<crate::src::cJSON::cJSON>() as crate::__stddef_size_t_h::size_t,
-    );
-    (*reference).string = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    (*reference).type_0 |= crate::src::cJSON::cJSON_IsReference;
-    (*reference).prev = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    (*reference).next = (*reference).prev;
-    return reference;
+macro_rules! add_item_to_array_raw {
+    ($array:expr, $item:expr) => {{
+        let array = $array;
+        let item = $item;
+        if array.is_null() || item.is_null() || array == item {
+            false_0
+        } else {
+            let item_ptr = item as *mut crate::src::cJSON::cJSON;
+            let child = (*array).child;
+            if child.is_null() {
+                (*array).child = item_ptr;
+                (*item).prev = item_ptr;
+                (*item).next = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+            } else if !(*child).prev.is_null() {
+                (*(*child).prev).next = item_ptr;
+                (*item).prev = (*child).prev;
+                (*child).prev = item_ptr;
+            }
+            true_0
+        }
+    }};
 }
 
-unsafe extern "C" fn add_item_to_array(
-    mut array: *mut crate::src::cJSON::cJSON,
-    mut item: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    let mut child: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    if item.is_null() || array.is_null() || array == item {
-        return false_0;
-    }
-    child = (*array).child as *mut crate::src::cJSON::cJSON;
-    if child.is_null() {
-        (*array).child = item as *mut crate::src::cJSON::cJSON;
-        (*item).prev = item as *mut crate::src::cJSON::cJSON;
-        (*item).next = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    } else if !(*child).prev.is_null() {
-        suffix_object((*child).prev as *mut crate::src::cJSON::cJSON, item);
-        (*(*array).child).prev = item as *mut crate::src::cJSON::cJSON;
-    }
-    return true_0;
-}
-pub unsafe extern "C" fn cJSON_AddItemToArray(
-    mut array: *mut crate::src::cJSON::cJSON,
-    mut item: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    return add_item_to_array(array, item);
+macro_rules! add_item_to_object_raw {
+    ($object:expr, $string:expr, $item:expr, $hooks:expr, $constant_key:expr) => {{
+        let object = $object;
+        let string = $string;
+        let item = $item;
+        if object.is_null() || string.is_null() || item.is_null() || object == item {
+            false_0
+        } else {
+            'add: {
+                let mut new_key: *mut ::core::ffi::c_char =
+                    ::core::ptr::null_mut::<::core::ffi::c_char>();
+                let mut new_type: ::core::ffi::c_int = crate::src::cJSON::cJSON_Invalid;
+                if $constant_key != 0 {
+                    new_key = string as *mut ::core::ffi::c_char;
+                    new_type = (*item).type_0 | crate::src::cJSON::cJSON_StringIsConst;
+                } else {
+                    new_key = match cJSON_strdup(Some(::std::ffi::CStr::from_ptr(string))) {
+                        Some(copy) => copy.into_raw(),
+                        None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+                    };
+                    if new_key.is_null() {
+                        break 'add false_0;
+                    }
+                    new_type = (*item).type_0 & !crate::src::cJSON::cJSON_StringIsConst;
+                }
+                let old_key_to_free =
+                    if (*item).type_0 & crate::src::cJSON::cJSON_StringIsConst == 0 {
+                        (*item).string
+                    } else {
+                        ::core::ptr::null_mut::<::core::ffi::c_char>()
+                    };
+                (*item).string = new_key;
+                (*item).type_0 = new_type;
+                if !old_key_to_free.is_null() {
+                    let old_key_address = old_key_to_free as usize;
+                    if !unregister_owned_c_string(old_key_address) {
+                        $hooks.deallocate.expect("non-null function pointer")(
+                            old_key_to_free as *mut ::core::ffi::c_void,
+                        );
+                    }
+                }
+                break 'add add_item_to_array_raw!(object, item);
+            }
+        }
+    }};
 }
 #[export_name = "cJSON_AddItemToArray"]
 
@@ -2580,52 +2462,10 @@ pub unsafe extern "C" fn cJSON_AddItemToArray_ffi(
     mut array: *mut crate::src::cJSON::cJSON,
     mut item: *mut crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_AddItemToArray(array, item)
-}
-unsafe extern "C" fn cast_away_const(
-    mut string: *const ::core::ffi::c_void,
-) -> *mut ::core::ffi::c_void {
-    return string as *mut ::core::ffi::c_void;
-}
-
-unsafe extern "C" fn add_item_to_object(
-    object: *mut crate::src::cJSON::cJSON,
-    string: *const ::core::ffi::c_char,
-    item: *mut crate::src::cJSON::cJSON,
-    hooks: *const internal_hooks,
-    constant_key: crate::src::cJSON::cJSON_bool,
-) -> crate::src::cJSON::cJSON_bool {
-    let mut new_key: *mut ::core::ffi::c_char = ::core::ptr::null_mut::<::core::ffi::c_char>();
-    let mut new_type: ::core::ffi::c_int = crate::src::cJSON::cJSON_Invalid;
-    if object.is_null() || string.is_null() || item.is_null() || object == item {
+    if item.is_null() || array.is_null() || array == item {
         return false_0;
     }
-    if constant_key != 0 {
-        new_key = cast_away_const(string as *const ::core::ffi::c_void) as *mut ::core::ffi::c_char;
-        new_type = (*item).type_0 | crate::src::cJSON::cJSON_StringIsConst;
-    } else {
-        new_key =
-            cJSON_strdup(string as *const ::core::ffi::c_uchar, hooks) as *mut ::core::ffi::c_char;
-        if new_key.is_null() {
-            return false_0;
-        }
-        new_type = (*item).type_0 & !crate::src::cJSON::cJSON_StringIsConst;
-    }
-    if (*item).type_0 & crate::src::cJSON::cJSON_StringIsConst == 0 && !(*item).string.is_null() {
-        (*hooks).deallocate.expect("non-null function pointer")(
-            (*item).string as *mut ::core::ffi::c_void,
-        );
-    }
-    (*item).string = new_key;
-    (*item).type_0 = new_type;
-    return add_item_to_array(object, item);
-}
-pub unsafe extern "C" fn cJSON_AddItemToObject(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-    mut item: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    return add_item_to_object(object, string, item, &raw mut global_hooks, false_0);
+    return add_item_to_array_raw!(array, item);
 }
 #[export_name = "cJSON_AddItemToObject"]
 
@@ -2634,14 +2474,11 @@ pub unsafe extern "C" fn cJSON_AddItemToObject_ffi(
     mut string: *const ::core::ffi::c_char,
     mut item: *mut crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_AddItemToObject(object, string, item)
-}
-pub unsafe extern "C" fn cJSON_AddItemToObjectCS(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-    mut item: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    return add_item_to_object(object, string, item, &raw mut global_hooks, true_0);
+    if object.is_null() || string.is_null() || item.is_null() || object == item {
+        return false_0;
+    }
+    let hooks = global_hooks_snapshot();
+    return add_item_to_object_raw!(object, string, item, &hooks, false_0);
 }
 #[export_name = "cJSON_AddItemToObjectCS"]
 
@@ -2650,16 +2487,11 @@ pub unsafe extern "C" fn cJSON_AddItemToObjectCS_ffi(
     mut string: *const ::core::ffi::c_char,
     mut item: *mut crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_AddItemToObjectCS(object, string, item)
-}
-pub unsafe extern "C" fn cJSON_AddItemReferenceToArray(
-    mut array: *mut crate::src::cJSON::cJSON,
-    mut item: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if array.is_null() {
+    if object.is_null() || string.is_null() || item.is_null() || object == item {
         return false_0;
     }
-    return add_item_to_array(array, create_reference(item, &raw mut global_hooks));
+    let hooks = global_hooks_snapshot();
+    return add_item_to_object_raw!(object, string, item, &hooks, true_0);
 }
 #[export_name = "cJSON_AddItemReferenceToArray"]
 
@@ -2667,23 +2499,26 @@ pub unsafe extern "C" fn cJSON_AddItemReferenceToArray_ffi(
     mut array: *mut crate::src::cJSON::cJSON,
     mut item: *mut crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_AddItemReferenceToArray(array, item)
-}
-pub unsafe extern "C" fn cJSON_AddItemReferenceToObject(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-    mut item: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if object.is_null() || string.is_null() {
+    if array.is_null() {
         return false_0;
     }
-    return add_item_to_object(
-        object,
-        string,
-        create_reference(item, &raw mut global_hooks),
-        &raw mut global_hooks,
-        false_0,
-    );
+    let hooks = global_hooks_snapshot();
+    if item.is_null() {
+        return false_0;
+    }
+    let Some(reference) = cJSON_New_Item(&hooks) else {
+        return false_0;
+    };
+    *reference = *item;
+    reference.string = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    reference.type_0 |= crate::src::cJSON::cJSON_IsReference;
+    reference.prev = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    reference.next = reference.prev;
+    let reference_ptr = reference as *mut crate::src::cJSON::cJSON;
+    if array == reference_ptr {
+        return false_0;
+    }
+    return add_item_to_array_raw!(array, reference_ptr);
 }
 #[export_name = "cJSON_AddItemReferenceToObject"]
 
@@ -2692,18 +2527,26 @@ pub unsafe extern "C" fn cJSON_AddItemReferenceToObject_ffi(
     mut string: *const ::core::ffi::c_char,
     mut item: *mut crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_AddItemReferenceToObject(object, string, item)
-}
-pub unsafe extern "C" fn cJSON_AddNullToObject(
-    object: *mut crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut null: *mut crate::src::cJSON::cJSON = cJSON_CreateNull();
-    if add_item_to_object(object, name, null, &raw mut global_hooks, false_0) != 0 {
-        return null;
+    if object.is_null() || string.is_null() {
+        return false_0;
     }
-    cJSON_Delete(null);
-    return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    let hooks = global_hooks_snapshot();
+    if item.is_null() {
+        return false_0;
+    }
+    let Some(reference) = cJSON_New_Item(&hooks) else {
+        return false_0;
+    };
+    *reference = *item;
+    reference.string = ::core::ptr::null_mut::<::core::ffi::c_char>();
+    reference.type_0 |= crate::src::cJSON::cJSON_IsReference;
+    reference.prev = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    reference.next = reference.prev;
+    let reference_ptr = reference as *mut crate::src::cJSON::cJSON;
+    if object == reference_ptr {
+        return false_0;
+    }
+    return add_item_to_object_raw!(object, string, reference_ptr, &hooks, false_0);
 }
 #[export_name = "cJSON_AddNullToObject"]
 
@@ -2711,17 +2554,17 @@ pub unsafe extern "C" fn cJSON_AddNullToObject_ffi(
     object: *mut crate::src::cJSON::cJSON,
     name: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_AddNullToObject(object, name)
-}
-pub unsafe extern "C" fn cJSON_AddTrueToObject(
-    object: *mut crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut true_item: *mut crate::src::cJSON::cJSON = cJSON_CreateTrue();
-    if add_item_to_object(object, name, true_item, &raw mut global_hooks, false_0) != 0 {
-        return true_item;
+    let mut null: *mut crate::src::cJSON::cJSON = cJSON_CreateNull_ffi();
+    let hooks = global_hooks_snapshot();
+    if !object.is_null()
+        && !name.is_null()
+        && !null.is_null()
+        && object != null
+        && add_item_to_object_raw!(object, name, null, &hooks, false_0) != 0
+    {
+        return null;
     }
-    cJSON_Delete(true_item);
+    cJSON_Delete_ffi(null);
     return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
 }
 #[export_name = "cJSON_AddTrueToObject"]
@@ -2730,17 +2573,17 @@ pub unsafe extern "C" fn cJSON_AddTrueToObject_ffi(
     object: *mut crate::src::cJSON::cJSON,
     name: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_AddTrueToObject(object, name)
-}
-pub unsafe extern "C" fn cJSON_AddFalseToObject(
-    object: *mut crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut false_item: *mut crate::src::cJSON::cJSON = cJSON_CreateFalse();
-    if add_item_to_object(object, name, false_item, &raw mut global_hooks, false_0) != 0 {
-        return false_item;
+    let mut true_item: *mut crate::src::cJSON::cJSON = cJSON_CreateTrue_ffi();
+    let hooks = global_hooks_snapshot();
+    if !object.is_null()
+        && !name.is_null()
+        && !true_item.is_null()
+        && object != true_item
+        && add_item_to_object_raw!(object, name, true_item, &hooks, false_0) != 0
+    {
+        return true_item;
     }
-    cJSON_Delete(false_item);
+    cJSON_Delete_ffi(true_item);
     return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
 }
 #[export_name = "cJSON_AddFalseToObject"]
@@ -2749,18 +2592,17 @@ pub unsafe extern "C" fn cJSON_AddFalseToObject_ffi(
     object: *mut crate::src::cJSON::cJSON,
     name: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_AddFalseToObject(object, name)
-}
-pub unsafe extern "C" fn cJSON_AddBoolToObject(
-    object: *mut crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-    boolean: crate::src::cJSON::cJSON_bool,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut bool_item: *mut crate::src::cJSON::cJSON = cJSON_CreateBool(boolean);
-    if add_item_to_object(object, name, bool_item, &raw mut global_hooks, false_0) != 0 {
-        return bool_item;
+    let mut false_item: *mut crate::src::cJSON::cJSON = cJSON_CreateFalse_ffi();
+    let hooks = global_hooks_snapshot();
+    if !object.is_null()
+        && !name.is_null()
+        && !false_item.is_null()
+        && object != false_item
+        && add_item_to_object_raw!(object, name, false_item, &hooks, false_0) != 0
+    {
+        return false_item;
     }
-    cJSON_Delete(bool_item);
+    cJSON_Delete_ffi(false_item);
     return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
 }
 #[export_name = "cJSON_AddBoolToObject"]
@@ -2770,18 +2612,17 @@ pub unsafe extern "C" fn cJSON_AddBoolToObject_ffi(
     name: *const ::core::ffi::c_char,
     boolean: crate::src::cJSON::cJSON_bool,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_AddBoolToObject(object, name, boolean)
-}
-pub unsafe extern "C" fn cJSON_AddNumberToObject(
-    object: *mut crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-    number: ::core::ffi::c_double,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut number_item: *mut crate::src::cJSON::cJSON = cJSON_CreateNumber(number);
-    if add_item_to_object(object, name, number_item, &raw mut global_hooks, false_0) != 0 {
-        return number_item;
+    let mut bool_item: *mut crate::src::cJSON::cJSON = cJSON_CreateBool_ffi(boolean);
+    let hooks = global_hooks_snapshot();
+    if !object.is_null()
+        && !name.is_null()
+        && !bool_item.is_null()
+        && object != bool_item
+        && add_item_to_object_raw!(object, name, bool_item, &hooks, false_0) != 0
+    {
+        return bool_item;
     }
-    cJSON_Delete(number_item);
+    cJSON_Delete_ffi(bool_item);
     return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
 }
 #[export_name = "cJSON_AddNumberToObject"]
@@ -2791,18 +2632,17 @@ pub unsafe extern "C" fn cJSON_AddNumberToObject_ffi(
     name: *const ::core::ffi::c_char,
     number: ::core::ffi::c_double,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_AddNumberToObject(object, name, number)
-}
-pub unsafe extern "C" fn cJSON_AddStringToObject(
-    object: *mut crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-    string: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut string_item: *mut crate::src::cJSON::cJSON = cJSON_CreateString(string);
-    if add_item_to_object(object, name, string_item, &raw mut global_hooks, false_0) != 0 {
-        return string_item;
+    let mut number_item: *mut crate::src::cJSON::cJSON = cJSON_CreateNumber_ffi(number);
+    let hooks = global_hooks_snapshot();
+    if !object.is_null()
+        && !name.is_null()
+        && !number_item.is_null()
+        && object != number_item
+        && add_item_to_object_raw!(object, name, number_item, &hooks, false_0) != 0
+    {
+        return number_item;
     }
-    cJSON_Delete(string_item);
+    cJSON_Delete_ffi(number_item);
     return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
 }
 #[export_name = "cJSON_AddStringToObject"]
@@ -2812,18 +2652,17 @@ pub unsafe extern "C" fn cJSON_AddStringToObject_ffi(
     name: *const ::core::ffi::c_char,
     string: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_AddStringToObject(object, name, string)
-}
-pub unsafe extern "C" fn cJSON_AddRawToObject(
-    object: *mut crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-    raw: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut raw_item: *mut crate::src::cJSON::cJSON = cJSON_CreateRaw(raw);
-    if add_item_to_object(object, name, raw_item, &raw mut global_hooks, false_0) != 0 {
-        return raw_item;
+    let mut string_item: *mut crate::src::cJSON::cJSON = cJSON_CreateString_ffi(string);
+    let hooks = global_hooks_snapshot();
+    if !object.is_null()
+        && !name.is_null()
+        && !string_item.is_null()
+        && object != string_item
+        && add_item_to_object_raw!(object, name, string_item, &hooks, false_0) != 0
+    {
+        return string_item;
     }
-    cJSON_Delete(raw_item);
+    cJSON_Delete_ffi(string_item);
     return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
 }
 #[export_name = "cJSON_AddRawToObject"]
@@ -2833,17 +2672,17 @@ pub unsafe extern "C" fn cJSON_AddRawToObject_ffi(
     name: *const ::core::ffi::c_char,
     raw: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_AddRawToObject(object, name, raw)
-}
-pub unsafe extern "C" fn cJSON_AddObjectToObject(
-    object: *mut crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut object_item: *mut crate::src::cJSON::cJSON = cJSON_CreateObject();
-    if add_item_to_object(object, name, object_item, &raw mut global_hooks, false_0) != 0 {
-        return object_item;
+    let mut raw_item: *mut crate::src::cJSON::cJSON = cJSON_CreateRaw_ffi(raw);
+    let hooks = global_hooks_snapshot();
+    if !object.is_null()
+        && !name.is_null()
+        && !raw_item.is_null()
+        && object != raw_item
+        && add_item_to_object_raw!(object, name, raw_item, &hooks, false_0) != 0
+    {
+        return raw_item;
     }
-    cJSON_Delete(object_item);
+    cJSON_Delete_ffi(raw_item);
     return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
 }
 #[export_name = "cJSON_AddObjectToObject"]
@@ -2852,17 +2691,17 @@ pub unsafe extern "C" fn cJSON_AddObjectToObject_ffi(
     object: *mut crate::src::cJSON::cJSON,
     name: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_AddObjectToObject(object, name)
-}
-pub unsafe extern "C" fn cJSON_AddArrayToObject(
-    object: *mut crate::src::cJSON::cJSON,
-    name: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut array: *mut crate::src::cJSON::cJSON = cJSON_CreateArray();
-    if add_item_to_object(object, name, array, &raw mut global_hooks, false_0) != 0 {
-        return array;
+    let mut object_item: *mut crate::src::cJSON::cJSON = cJSON_CreateObject_ffi();
+    let hooks = global_hooks_snapshot();
+    if !object.is_null()
+        && !name.is_null()
+        && !object_item.is_null()
+        && object != object_item
+        && add_item_to_object_raw!(object, name, object_item, &hooks, false_0) != 0
+    {
+        return object_item;
     }
-    cJSON_Delete(array);
+    cJSON_Delete_ffi(object_item);
     return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
 }
 #[export_name = "cJSON_AddArrayToObject"]
@@ -2871,9 +2710,22 @@ pub unsafe extern "C" fn cJSON_AddArrayToObject_ffi(
     object: *mut crate::src::cJSON::cJSON,
     name: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_AddArrayToObject(object, name)
+    let mut array: *mut crate::src::cJSON::cJSON = cJSON_CreateArray_ffi();
+    let hooks = global_hooks_snapshot();
+    if !object.is_null()
+        && !name.is_null()
+        && !array.is_null()
+        && object != array
+        && add_item_to_object_raw!(object, name, array, &hooks, false_0) != 0
+    {
+        return array;
+    }
+    cJSON_Delete_ffi(array);
+    return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
 }
-pub unsafe extern "C" fn cJSON_DetachItemViaPointer(
+#[export_name = "cJSON_DetachItemViaPointer"]
+
+pub unsafe extern "C" fn cJSON_DetachItemViaPointer_ffi(
     mut parent: *mut crate::src::cJSON::cJSON,
     item: *mut crate::src::cJSON::cJSON,
 ) -> *mut crate::src::cJSON::cJSON {
@@ -2895,39 +2747,26 @@ pub unsafe extern "C" fn cJSON_DetachItemViaPointer(
     (*item).next = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     return item;
 }
-#[export_name = "cJSON_DetachItemViaPointer"]
-
-pub unsafe extern "C" fn cJSON_DetachItemViaPointer_ffi(
-    mut parent: *mut crate::src::cJSON::cJSON,
-    item: *mut crate::src::cJSON::cJSON,
-) -> *mut crate::src::cJSON::cJSON {
-    cJSON_DetachItemViaPointer(parent, item)
-}
-pub unsafe extern "C" fn cJSON_DetachItemFromArray(
-    mut array: *mut crate::src::cJSON::cJSON,
-    mut which: ::core::ffi::c_int,
-) -> *mut crate::src::cJSON::cJSON {
-    if which < 0 as ::core::ffi::c_int {
-        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    }
-    return cJSON_DetachItemViaPointer(
-        array,
-        get_array_item(array, which as crate::__stddef_size_t_h::size_t),
-    );
-}
 #[export_name = "cJSON_DetachItemFromArray"]
 
 pub unsafe extern "C" fn cJSON_DetachItemFromArray_ffi(
     mut array: *mut crate::src::cJSON::cJSON,
     mut which: ::core::ffi::c_int,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_DetachItemFromArray(array, which)
-}
-pub unsafe extern "C" fn cJSON_DeleteItemFromArray(
-    mut array: *mut crate::src::cJSON::cJSON,
-    mut which: ::core::ffi::c_int,
-) {
-    cJSON_Delete(cJSON_DetachItemFromArray(array, which));
+    let mut item: *mut crate::src::cJSON::cJSON =
+        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    if which < 0 as ::core::ffi::c_int {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    }
+    if !array.is_null() {
+        item = (*array).child as *mut crate::src::cJSON::cJSON;
+        let mut index = which as crate::__stddef_size_t_h::size_t;
+        while !item.is_null() && index > 0 as crate::__stddef_size_t_h::size_t {
+            index = index.wrapping_sub(1);
+            item = (*item).next as *mut crate::src::cJSON::cJSON;
+        }
+    }
+    return cJSON_DetachItemViaPointer_ffi(array, item);
 }
 #[export_name = "cJSON_DeleteItemFromArray"]
 
@@ -2935,14 +2774,7 @@ pub unsafe extern "C" fn cJSON_DeleteItemFromArray_ffi(
     mut array: *mut crate::src::cJSON::cJSON,
     mut which: ::core::ffi::c_int,
 ) {
-    cJSON_DeleteItemFromArray(array, which)
-}
-pub unsafe extern "C" fn cJSON_DetachItemFromObject(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut to_detach: *mut crate::src::cJSON::cJSON = cJSON_GetObjectItem(object, string);
-    return cJSON_DetachItemViaPointer(object, to_detach);
+    cJSON_Delete_ffi(cJSON_DetachItemFromArray_ffi(array, which));
 }
 #[export_name = "cJSON_DetachItemFromObject"]
 
@@ -2950,15 +2782,13 @@ pub unsafe extern "C" fn cJSON_DetachItemFromObject_ffi(
     mut object: *mut crate::src::cJSON::cJSON,
     mut string: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_DetachItemFromObject(object, string)
-}
-pub unsafe extern "C" fn cJSON_DetachItemFromObjectCaseSensitive(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut to_detach: *mut crate::src::cJSON::cJSON =
-        cJSON_GetObjectItemCaseSensitive(object, string);
-    return cJSON_DetachItemViaPointer(object, to_detach);
+    let name = if string.is_null() {
+        None
+    } else {
+        Some(::std::ffi::CStr::from_ptr(string))
+    };
+    let to_detach: *mut crate::src::cJSON::cJSON = get_object_item_from_raw!(object, name, false_0);
+    return cJSON_DetachItemViaPointer_ffi(object, to_detach);
 }
 #[export_name = "cJSON_DetachItemFromObjectCaseSensitive"]
 
@@ -2966,13 +2796,13 @@ pub unsafe extern "C" fn cJSON_DetachItemFromObjectCaseSensitive_ffi(
     mut object: *mut crate::src::cJSON::cJSON,
     mut string: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_DetachItemFromObjectCaseSensitive(object, string)
-}
-pub unsafe extern "C" fn cJSON_DeleteItemFromObject(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-) {
-    cJSON_Delete(cJSON_DetachItemFromObject(object, string));
+    let name = if string.is_null() {
+        None
+    } else {
+        Some(::std::ffi::CStr::from_ptr(string))
+    };
+    let to_detach: *mut crate::src::cJSON::cJSON = get_object_item_from_raw!(object, name, true_0);
+    return cJSON_DetachItemViaPointer_ffi(object, to_detach);
 }
 #[export_name = "cJSON_DeleteItemFromObject"]
 
@@ -2980,13 +2810,7 @@ pub unsafe extern "C" fn cJSON_DeleteItemFromObject_ffi(
     mut object: *mut crate::src::cJSON::cJSON,
     mut string: *const ::core::ffi::c_char,
 ) {
-    cJSON_DeleteItemFromObject(object, string)
-}
-pub unsafe extern "C" fn cJSON_DeleteItemFromObjectCaseSensitive(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-) {
-    cJSON_Delete(cJSON_DetachItemFromObjectCaseSensitive(object, string));
+    cJSON_Delete_ffi(cJSON_DetachItemFromObject_ffi(object, string));
 }
 #[export_name = "cJSON_DeleteItemFromObjectCaseSensitive"]
 
@@ -2994,9 +2818,11 @@ pub unsafe extern "C" fn cJSON_DeleteItemFromObjectCaseSensitive_ffi(
     mut object: *mut crate::src::cJSON::cJSON,
     mut string: *const ::core::ffi::c_char,
 ) {
-    cJSON_DeleteItemFromObjectCaseSensitive(object, string)
+    cJSON_Delete_ffi(cJSON_DetachItemFromObjectCaseSensitive_ffi(object, string));
 }
-pub unsafe extern "C" fn cJSON_InsertItemInArray(
+#[export_name = "cJSON_InsertItemInArray"]
+
+pub unsafe extern "C" fn cJSON_InsertItemInArray_ffi(
     mut array: *mut crate::src::cJSON::cJSON,
     mut which: ::core::ffi::c_int,
     mut newitem: *mut crate::src::cJSON::cJSON,
@@ -3006,9 +2832,19 @@ pub unsafe extern "C" fn cJSON_InsertItemInArray(
     if which < 0 as ::core::ffi::c_int || newitem.is_null() {
         return false_0;
     }
-    after_inserted = get_array_item(array, which as crate::__stddef_size_t_h::size_t);
+    if !array.is_null() {
+        after_inserted = (*array).child as *mut crate::src::cJSON::cJSON;
+        let mut index = which as crate::__stddef_size_t_h::size_t;
+        while !after_inserted.is_null() && index > 0 as crate::__stddef_size_t_h::size_t {
+            index = index.wrapping_sub(1);
+            after_inserted = (*after_inserted).next as *mut crate::src::cJSON::cJSON;
+        }
+    }
     if after_inserted.is_null() {
-        return add_item_to_array(array, newitem);
+        if array.is_null() || array == newitem {
+            return false_0;
+        }
+        return add_item_to_array_raw!(array, newitem);
     }
     if after_inserted != (*array).child && (*after_inserted).prev.is_null() {
         return false_0;
@@ -3023,16 +2859,9 @@ pub unsafe extern "C" fn cJSON_InsertItemInArray(
     }
     return true_0;
 }
-#[export_name = "cJSON_InsertItemInArray"]
+#[export_name = "cJSON_ReplaceItemViaPointer"]
 
-pub unsafe extern "C" fn cJSON_InsertItemInArray_ffi(
-    mut array: *mut crate::src::cJSON::cJSON,
-    mut which: ::core::ffi::c_int,
-    mut newitem: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    cJSON_InsertItemInArray(array, which, newitem)
-}
-pub unsafe extern "C" fn cJSON_ReplaceItemViaPointer(
+pub unsafe extern "C" fn cJSON_ReplaceItemViaPointer_ffi(
     parent: *mut crate::src::cJSON::cJSON,
     item: *mut crate::src::cJSON::cJSON,
     mut replacement: *mut crate::src::cJSON::cJSON,
@@ -3063,31 +2892,8 @@ pub unsafe extern "C" fn cJSON_ReplaceItemViaPointer(
     }
     (*item).next = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     (*item).prev = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    cJSON_Delete(item);
+    cJSON_Delete_ffi(item);
     return true_0;
-}
-#[export_name = "cJSON_ReplaceItemViaPointer"]
-
-pub unsafe extern "C" fn cJSON_ReplaceItemViaPointer_ffi(
-    parent: *mut crate::src::cJSON::cJSON,
-    item: *mut crate::src::cJSON::cJSON,
-    mut replacement: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    cJSON_ReplaceItemViaPointer(parent, item, replacement)
-}
-pub unsafe extern "C" fn cJSON_ReplaceItemInArray(
-    mut array: *mut crate::src::cJSON::cJSON,
-    mut which: ::core::ffi::c_int,
-    mut newitem: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if which < 0 as ::core::ffi::c_int {
-        return false_0;
-    }
-    return cJSON_ReplaceItemViaPointer(
-        array,
-        get_array_item(array, which as crate::__stddef_size_t_h::size_t),
-        newitem,
-    );
 }
 #[export_name = "cJSON_ReplaceItemInArray"]
 
@@ -3096,41 +2902,20 @@ pub unsafe extern "C" fn cJSON_ReplaceItemInArray_ffi(
     mut which: ::core::ffi::c_int,
     mut newitem: *mut crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_ReplaceItemInArray(array, which, newitem)
-}
-unsafe extern "C" fn replace_item_in_object(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-    mut replacement: *mut crate::src::cJSON::cJSON,
-    mut case_sensitive: crate::src::cJSON::cJSON_bool,
-) -> crate::src::cJSON::cJSON_bool {
-    if replacement.is_null() || string.is_null() {
+    let mut item: *mut crate::src::cJSON::cJSON =
+        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    if which < 0 as ::core::ffi::c_int {
         return false_0;
     }
-    if (*replacement).type_0 & crate::src::cJSON::cJSON_StringIsConst == 0
-        && !(*replacement).string.is_null()
-    {
-        cJSON_free((*replacement).string as *mut ::core::ffi::c_void);
+    if !array.is_null() {
+        item = (*array).child as *mut crate::src::cJSON::cJSON;
+        let mut index = which as crate::__stddef_size_t_h::size_t;
+        while !item.is_null() && index > 0 as crate::__stddef_size_t_h::size_t {
+            index = index.wrapping_sub(1);
+            item = (*item).next as *mut crate::src::cJSON::cJSON;
+        }
     }
-    (*replacement).string =
-        cJSON_strdup(string as *const ::core::ffi::c_uchar, &raw mut global_hooks)
-            as *mut ::core::ffi::c_char;
-    if (*replacement).string.is_null() {
-        return false_0;
-    }
-    (*replacement).type_0 &= !crate::src::cJSON::cJSON_StringIsConst;
-    return cJSON_ReplaceItemViaPointer(
-        object,
-        get_object_item(object, string, case_sensitive),
-        replacement,
-    );
-}
-pub unsafe extern "C" fn cJSON_ReplaceItemInObject(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-    mut newitem: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    return replace_item_in_object(object, string, newitem, false_0);
+    return cJSON_ReplaceItemViaPointer_ffi(array, item, newitem);
 }
 #[export_name = "cJSON_ReplaceItemInObject"]
 
@@ -3139,14 +2924,41 @@ pub unsafe extern "C" fn cJSON_ReplaceItemInObject_ffi(
     mut string: *const ::core::ffi::c_char,
     mut newitem: *mut crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_ReplaceItemInObject(object, string, newitem)
-}
-pub unsafe extern "C" fn cJSON_ReplaceItemInObjectCaseSensitive(
-    mut object: *mut crate::src::cJSON::cJSON,
-    mut string: *const ::core::ffi::c_char,
-    mut newitem: *mut crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    return replace_item_in_object(object, string, newitem, true_0);
+    if newitem.is_null() || string.is_null() {
+        return false_0;
+    }
+    if (*newitem).type_0 & crate::src::cJSON::cJSON_StringIsConst == 0
+        && !(*newitem).string.is_null()
+    {
+        let old_string_address = (*newitem).string as usize;
+        if !unregister_owned_c_string(old_string_address) {
+            global_hooks_snapshot()
+                .deallocate
+                .expect("non-null function pointer")(
+                (*newitem).string as *mut ::core::ffi::c_void
+            );
+        }
+    }
+    (*newitem).string = match cJSON_strdup(Some(::std::ffi::CStr::from_ptr(string))) {
+        Some(copy) => copy.into_raw(),
+        None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+    };
+    if (*newitem).string.is_null() {
+        return false_0;
+    }
+    (*newitem).type_0 &= !crate::src::cJSON::cJSON_StringIsConst;
+    return cJSON_ReplaceItemViaPointer_ffi(
+        object,
+        {
+            let name = if string.is_null() {
+                None
+            } else {
+                Some(::std::ffi::CStr::from_ptr(string))
+            };
+            get_object_item_from_raw!(object, name, false_0)
+        },
+        newitem,
+    );
 }
 #[export_name = "cJSON_ReplaceItemInObjectCaseSensitive"]
 
@@ -3155,245 +2967,214 @@ pub unsafe extern "C" fn cJSON_ReplaceItemInObjectCaseSensitive_ffi(
     mut string: *const ::core::ffi::c_char,
     mut newitem: *mut crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_ReplaceItemInObjectCaseSensitive(object, string, newitem)
-}
-pub unsafe extern "C" fn cJSON_CreateNull() -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_NULL;
+    if newitem.is_null() || string.is_null() {
+        return false_0;
     }
-    return item;
+    if (*newitem).type_0 & crate::src::cJSON::cJSON_StringIsConst == 0
+        && !(*newitem).string.is_null()
+    {
+        let old_string_address = (*newitem).string as usize;
+        if !unregister_owned_c_string(old_string_address) {
+            global_hooks_snapshot()
+                .deallocate
+                .expect("non-null function pointer")(
+                (*newitem).string as *mut ::core::ffi::c_void
+            );
+        }
+    }
+    (*newitem).string = match cJSON_strdup(Some(::std::ffi::CStr::from_ptr(string))) {
+        Some(copy) => copy.into_raw(),
+        None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+    };
+    if (*newitem).string.is_null() {
+        return false_0;
+    }
+    (*newitem).type_0 &= !crate::src::cJSON::cJSON_StringIsConst;
+    return cJSON_ReplaceItemViaPointer_ffi(
+        object,
+        {
+            let name = if string.is_null() {
+                None
+            } else {
+                Some(::std::ffi::CStr::from_ptr(string))
+            };
+            get_object_item_from_raw!(object, name, true_0)
+        },
+        newitem,
+    );
 }
 #[export_name = "cJSON_CreateNull"]
 
 pub unsafe extern "C" fn cJSON_CreateNull_ffi() -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateNull()
-}
-pub unsafe extern "C" fn cJSON_CreateTrue() -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_True;
-    }
-    return item;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_NULL;
+    return item as *mut crate::src::cJSON::cJSON;
 }
 #[export_name = "cJSON_CreateTrue"]
 
 pub unsafe extern "C" fn cJSON_CreateTrue_ffi() -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateTrue()
-}
-pub unsafe extern "C" fn cJSON_CreateFalse() -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_False;
-    }
-    return item;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_True;
+    return item as *mut crate::src::cJSON::cJSON;
 }
 #[export_name = "cJSON_CreateFalse"]
 
 pub unsafe extern "C" fn cJSON_CreateFalse_ffi() -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateFalse()
-}
-pub unsafe extern "C" fn cJSON_CreateBool(
-    mut boolean: crate::src::cJSON::cJSON_bool,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = if boolean != 0 {
-            crate::src::cJSON::cJSON_True
-        } else {
-            crate::src::cJSON::cJSON_False
-        };
-    }
-    return item;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_False;
+    return item as *mut crate::src::cJSON::cJSON;
 }
 #[export_name = "cJSON_CreateBool"]
 
 pub unsafe extern "C" fn cJSON_CreateBool_ffi(
     mut boolean: crate::src::cJSON::cJSON_bool,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateBool(boolean)
-}
-pub unsafe extern "C" fn cJSON_CreateNumber(
-    mut num: ::core::ffi::c_double,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_Number;
-        (*item).valuedouble = num;
-        if num >= crate::limits_h::INT_MAX as ::core::ffi::c_double {
-            (*item).valueint = crate::limits_h::INT_MAX;
-        } else if num <= crate::limits_h::INT_MIN as ::core::ffi::c_double {
-            (*item).valueint = crate::limits_h::INT_MIN;
-        } else {
-            (*item).valueint = num as ::core::ffi::c_int;
-        }
-    }
-    return item;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = if boolean != 0 {
+        crate::src::cJSON::cJSON_True
+    } else {
+        crate::src::cJSON::cJSON_False
+    };
+    return item as *mut crate::src::cJSON::cJSON;
 }
 #[export_name = "cJSON_CreateNumber"]
 
 pub unsafe extern "C" fn cJSON_CreateNumber_ffi(
     mut num: ::core::ffi::c_double,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateNumber(num)
-}
-pub unsafe extern "C" fn cJSON_CreateString(
-    mut string: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_String;
-        (*item).valuestring =
-            cJSON_strdup(string as *const ::core::ffi::c_uchar, &raw mut global_hooks)
-                as *mut ::core::ffi::c_char;
-        if (*item).valuestring.is_null() {
-            cJSON_Delete(item);
-            return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-        }
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_Number;
+    item.valuedouble = num;
+    if num >= crate::limits_h::INT_MAX as ::core::ffi::c_double {
+        item.valueint = crate::limits_h::INT_MAX;
+    } else if num <= crate::limits_h::INT_MIN as ::core::ffi::c_double {
+        item.valueint = crate::limits_h::INT_MIN;
+    } else {
+        item.valueint = num as ::core::ffi::c_int;
     }
-    return item;
+    return item as *mut crate::src::cJSON::cJSON;
 }
 #[export_name = "cJSON_CreateString"]
 
 pub unsafe extern "C" fn cJSON_CreateString_ffi(
     mut string: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateString(string)
-}
-pub unsafe extern "C" fn cJSON_CreateStringReference(
-    mut string: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_String | crate::src::cJSON::cJSON_IsReference;
-        (*item).valuestring =
-            cast_away_const(string as *const ::core::ffi::c_void) as *mut ::core::ffi::c_char;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_String;
+    item.valuestring = match cJSON_strdup(if string.is_null() {
+        None
+    } else {
+        Some(::std::ffi::CStr::from_ptr(string))
+    }) {
+        Some(copy) => copy.into_raw(),
+        None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+    };
+    if item.valuestring.is_null() {
+        cJSON_Delete_ffi(item as *mut crate::src::cJSON::cJSON);
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     }
-    return item;
+    return item as *mut crate::src::cJSON::cJSON;
 }
 #[export_name = "cJSON_CreateStringReference"]
 
 pub unsafe extern "C" fn cJSON_CreateStringReference_ffi(
     mut string: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateStringReference(string)
-}
-pub unsafe extern "C" fn cJSON_CreateObjectReference(
-    mut child: *const crate::src::cJSON::cJSON,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_Object | crate::src::cJSON::cJSON_IsReference;
-        (*item).child = cast_away_const(child as *const ::core::ffi::c_void)
-            as *mut crate::src::cJSON::cJSON
-            as *mut crate::src::cJSON::cJSON;
-    }
-    return item;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_String | crate::src::cJSON::cJSON_IsReference;
+    item.valuestring = string as *mut ::core::ffi::c_char;
+    item as *mut crate::src::cJSON::cJSON
 }
 #[export_name = "cJSON_CreateObjectReference"]
 
 pub unsafe extern "C" fn cJSON_CreateObjectReference_ffi(
     mut child: *const crate::src::cJSON::cJSON,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateObjectReference(child)
-}
-pub unsafe extern "C" fn cJSON_CreateArrayReference(
-    mut child: *const crate::src::cJSON::cJSON,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_Array | crate::src::cJSON::cJSON_IsReference;
-        (*item).child = cast_away_const(child as *const ::core::ffi::c_void)
-            as *mut crate::src::cJSON::cJSON
-            as *mut crate::src::cJSON::cJSON;
-    }
-    return item;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_Object | crate::src::cJSON::cJSON_IsReference;
+    item.child = child as *mut crate::src::cJSON::cJSON;
+    item as *mut crate::src::cJSON::cJSON
 }
 #[export_name = "cJSON_CreateArrayReference"]
 
 pub unsafe extern "C" fn cJSON_CreateArrayReference_ffi(
     mut child: *const crate::src::cJSON::cJSON,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateArrayReference(child)
-}
-pub unsafe extern "C" fn cJSON_CreateRaw(
-    mut raw: *const ::core::ffi::c_char,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_Raw;
-        (*item).valuestring =
-            cJSON_strdup(raw as *const ::core::ffi::c_uchar, &raw mut global_hooks)
-                as *mut ::core::ffi::c_char;
-        if (*item).valuestring.is_null() {
-            cJSON_Delete(item);
-            return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-        }
-    }
-    return item;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_Array | crate::src::cJSON::cJSON_IsReference;
+    item.child = child as *mut crate::src::cJSON::cJSON;
+    item as *mut crate::src::cJSON::cJSON
 }
 #[export_name = "cJSON_CreateRaw"]
 
 pub unsafe extern "C" fn cJSON_CreateRaw_ffi(
     mut raw: *const ::core::ffi::c_char,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateRaw(raw)
-}
-pub unsafe extern "C" fn cJSON_CreateArray() -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_Array;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_Raw;
+    item.valuestring = match cJSON_strdup(if raw.is_null() {
+        None
+    } else {
+        Some(::std::ffi::CStr::from_ptr(raw))
+    }) {
+        Some(copy) => copy.into_raw(),
+        None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+    };
+    if item.valuestring.is_null() {
+        cJSON_Delete_ffi(item as *mut crate::src::cJSON::cJSON);
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     }
-    return item;
+    return item as *mut crate::src::cJSON::cJSON;
 }
 #[export_name = "cJSON_CreateArray"]
 
 pub unsafe extern "C" fn cJSON_CreateArray_ffi() -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateArray()
-}
-pub unsafe extern "C" fn cJSON_CreateObject() -> *mut crate::src::cJSON::cJSON {
-    let mut item: *mut crate::src::cJSON::cJSON = cJSON_New_Item(&raw mut global_hooks);
-    if !item.is_null() {
-        (*item).type_0 = crate::src::cJSON::cJSON_Object;
-    }
-    return item;
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    item.type_0 = crate::src::cJSON::cJSON_Array;
+    return item as *mut crate::src::cJSON::cJSON;
 }
 #[export_name = "cJSON_CreateObject"]
 
 pub unsafe extern "C" fn cJSON_CreateObject_ffi() -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateObject()
-}
-pub unsafe extern "C" fn cJSON_CreateIntArray(
-    mut numbers: *const ::core::ffi::c_int,
-    mut count: ::core::ffi::c_int,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut i: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
-    let mut n: *mut crate::src::cJSON::cJSON = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    let mut p: *mut crate::src::cJSON::cJSON = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    let mut a: *mut crate::src::cJSON::cJSON = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    if count < 0 as ::core::ffi::c_int || numbers.is_null() {
+    let hooks = global_hooks_snapshot();
+    let Some(item) = cJSON_New_Item(&hooks) else {
         return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    }
-    a = cJSON_CreateArray();
-    i = 0 as crate::__stddef_size_t_h::size_t;
-    while !a.is_null() && i < count as crate::__stddef_size_t_h::size_t {
-        n = cJSON_CreateNumber(*numbers.offset(i as isize) as ::core::ffi::c_double);
-        if n.is_null() {
-            cJSON_Delete(a);
-            return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-        }
-        if i == 0 {
-            (*a).child = n as *mut crate::src::cJSON::cJSON;
-        } else {
-            suffix_object(p, n);
-        }
-        p = n;
-        i = i.wrapping_add(1);
-    }
-    if !a.is_null() && !(*a).child.is_null() {
-        (*(*a).child).prev = n as *mut crate::src::cJSON::cJSON;
-    }
-    return a;
+    };
+    item.type_0 = crate::src::cJSON::cJSON_Object;
+    return item as *mut crate::src::cJSON::cJSON;
 }
 #[export_name = "cJSON_CreateIntArray"]
 
@@ -3401,12 +3182,6 @@ pub unsafe extern "C" fn cJSON_CreateIntArray_ffi(
     mut numbers: *const ::core::ffi::c_int,
     mut count: ::core::ffi::c_int,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateIntArray(numbers, count)
-}
-pub unsafe extern "C" fn cJSON_CreateFloatArray(
-    mut numbers: *const ::core::ffi::c_float,
-    mut count: ::core::ffi::c_int,
-) -> *mut crate::src::cJSON::cJSON {
     let mut i: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
     let mut n: *mut crate::src::cJSON::cJSON = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     let mut p: *mut crate::src::cJSON::cJSON = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
@@ -3414,24 +3189,28 @@ pub unsafe extern "C" fn cJSON_CreateFloatArray(
     if count < 0 as ::core::ffi::c_int || numbers.is_null() {
         return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     }
-    a = cJSON_CreateArray();
+    a = cJSON_CreateArray_ffi();
+    if a.is_null() {
+        return a;
+    }
+    let array = &mut *a;
     i = 0 as crate::__stddef_size_t_h::size_t;
-    while !a.is_null() && i < count as crate::__stddef_size_t_h::size_t {
-        n = cJSON_CreateNumber(*numbers.offset(i as isize) as ::core::ffi::c_double);
+    while i < count as crate::__stddef_size_t_h::size_t {
+        n = cJSON_CreateNumber_ffi(*numbers.offset(i as isize) as ::core::ffi::c_double);
         if n.is_null() {
-            cJSON_Delete(a);
+            cJSON_Delete_ffi(a);
             return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
         }
         if i == 0 {
-            (*a).child = n as *mut crate::src::cJSON::cJSON;
+            array.child = n as *mut crate::src::cJSON::cJSON;
         } else {
-            suffix_object(p, n);
+            suffix_object(&mut *p, &mut *n);
         }
         p = n;
         i = i.wrapping_add(1);
     }
-    if !a.is_null() && !(*a).child.is_null() {
-        (*(*a).child).prev = n as *mut crate::src::cJSON::cJSON;
+    if !array.child.is_null() {
+        (*array.child).prev = n as *mut crate::src::cJSON::cJSON;
     }
     return a;
 }
@@ -3441,9 +3220,41 @@ pub unsafe extern "C" fn cJSON_CreateFloatArray_ffi(
     mut numbers: *const ::core::ffi::c_float,
     mut count: ::core::ffi::c_int,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateFloatArray(numbers, count)
+    let mut i: crate::__stddef_size_t_h::size_t = 0 as crate::__stddef_size_t_h::size_t;
+    let mut n: *mut crate::src::cJSON::cJSON = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    let mut p: *mut crate::src::cJSON::cJSON = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    let mut a: *mut crate::src::cJSON::cJSON = ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    if count < 0 as ::core::ffi::c_int || numbers.is_null() {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    }
+    a = cJSON_CreateArray_ffi();
+    if a.is_null() {
+        return a;
+    }
+    let array = &mut *a;
+    i = 0 as crate::__stddef_size_t_h::size_t;
+    while i < count as crate::__stddef_size_t_h::size_t {
+        n = cJSON_CreateNumber_ffi(*numbers.offset(i as isize) as ::core::ffi::c_double);
+        if n.is_null() {
+            cJSON_Delete_ffi(a);
+            return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+        }
+        if i == 0 {
+            array.child = n as *mut crate::src::cJSON::cJSON;
+        } else {
+            suffix_object(&mut *p, &mut *n);
+        }
+        p = n;
+        i = i.wrapping_add(1);
+    }
+    if !array.child.is_null() {
+        (*array.child).prev = n as *mut crate::src::cJSON::cJSON;
+    }
+    return a;
 }
-pub unsafe extern "C" fn cJSON_CreateDoubleArray(
+#[export_name = "cJSON_CreateDoubleArray"]
+
+pub unsafe extern "C" fn cJSON_CreateDoubleArray_ffi(
     mut numbers: *const ::core::ffi::c_double,
     mut count: ::core::ffi::c_int,
 ) -> *mut crate::src::cJSON::cJSON {
@@ -3454,36 +3265,34 @@ pub unsafe extern "C" fn cJSON_CreateDoubleArray(
     if count < 0 as ::core::ffi::c_int || numbers.is_null() {
         return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     }
-    a = cJSON_CreateArray();
+    a = cJSON_CreateArray_ffi();
+    if a.is_null() {
+        return a;
+    }
+    let array = &mut *a;
     i = 0 as crate::__stddef_size_t_h::size_t;
-    while !a.is_null() && i < count as crate::__stddef_size_t_h::size_t {
-        n = cJSON_CreateNumber(*numbers.offset(i as isize));
+    while i < count as crate::__stddef_size_t_h::size_t {
+        n = cJSON_CreateNumber_ffi(*numbers.offset(i as isize));
         if n.is_null() {
-            cJSON_Delete(a);
+            cJSON_Delete_ffi(a);
             return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
         }
         if i == 0 {
-            (*a).child = n as *mut crate::src::cJSON::cJSON;
+            array.child = n as *mut crate::src::cJSON::cJSON;
         } else {
-            suffix_object(p, n);
+            suffix_object(&mut *p, &mut *n);
         }
         p = n;
         i = i.wrapping_add(1);
     }
-    if !a.is_null() && !(*a).child.is_null() {
-        (*(*a).child).prev = n as *mut crate::src::cJSON::cJSON;
+    if !array.child.is_null() {
+        (*array.child).prev = n as *mut crate::src::cJSON::cJSON;
     }
     return a;
 }
-#[export_name = "cJSON_CreateDoubleArray"]
+#[export_name = "cJSON_CreateStringArray"]
 
-pub unsafe extern "C" fn cJSON_CreateDoubleArray_ffi(
-    mut numbers: *const ::core::ffi::c_double,
-    mut count: ::core::ffi::c_int,
-) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateDoubleArray(numbers, count)
-}
-pub unsafe extern "C" fn cJSON_CreateStringArray(
+pub unsafe extern "C" fn cJSON_CreateStringArray_ffi(
     mut strings: *const *const ::core::ffi::c_char,
     mut count: ::core::ffi::c_int,
 ) -> *mut crate::src::cJSON::cJSON {
@@ -3494,40 +3303,30 @@ pub unsafe extern "C" fn cJSON_CreateStringArray(
     if count < 0 as ::core::ffi::c_int || strings.is_null() {
         return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
     }
-    a = cJSON_CreateArray();
+    a = cJSON_CreateArray_ffi();
+    if a.is_null() {
+        return a;
+    }
+    let array = &mut *a;
     i = 0 as crate::__stddef_size_t_h::size_t;
-    while !a.is_null() && i < count as crate::__stddef_size_t_h::size_t {
-        n = cJSON_CreateString(*strings.offset(i as isize));
+    while i < count as crate::__stddef_size_t_h::size_t {
+        n = cJSON_CreateString_ffi(*strings.offset(i as isize));
         if n.is_null() {
-            cJSON_Delete(a);
+            cJSON_Delete_ffi(a);
             return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
         }
         if i == 0 {
-            (*a).child = n as *mut crate::src::cJSON::cJSON;
+            array.child = n as *mut crate::src::cJSON::cJSON;
         } else {
-            suffix_object(p, n);
+            suffix_object(&mut *p, &mut *n);
         }
         p = n;
         i = i.wrapping_add(1);
     }
-    if !a.is_null() && !(*a).child.is_null() {
-        (*(*a).child).prev = n as *mut crate::src::cJSON::cJSON;
+    if !array.child.is_null() {
+        (*array.child).prev = n as *mut crate::src::cJSON::cJSON;
     }
     return a;
-}
-#[export_name = "cJSON_CreateStringArray"]
-
-pub unsafe extern "C" fn cJSON_CreateStringArray_ffi(
-    mut strings: *const *const ::core::ffi::c_char,
-    mut count: ::core::ffi::c_int,
-) -> *mut crate::src::cJSON::cJSON {
-    cJSON_CreateStringArray(strings, count)
-}
-pub unsafe extern "C" fn cJSON_Duplicate(
-    mut item: *const crate::src::cJSON::cJSON,
-    mut recurse: crate::src::cJSON::cJSON_bool,
-) -> *mut crate::src::cJSON::cJSON {
-    return cJSON_Duplicate_rec(item, 0 as crate::__stddef_size_t_h::size_t, recurse);
 }
 #[export_name = "cJSON_Duplicate"]
 
@@ -3535,120 +3334,102 @@ pub unsafe extern "C" fn cJSON_Duplicate_ffi(
     mut item: *const crate::src::cJSON::cJSON,
     mut recurse: crate::src::cJSON::cJSON_bool,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_Duplicate(item, recurse)
+    let Some(item) = duplicate_tree_from_raw!(item, recurse, 0 as crate::__stddef_size_t_h::size_t)
+    else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    match cJSON_Duplicate_rec(&item, 0 as crate::__stddef_size_t_h::size_t, recurse) {
+        DuplicateResult::Success(duplicate) => duplicate as *mut crate::src::cJSON::cJSON,
+        DuplicateResult::Failure(partial) => {
+            if let Some(partial) = partial {
+                cJSON_Delete_ffi(partial as *mut crate::src::cJSON::cJSON);
+            }
+            ::core::ptr::null_mut::<crate::src::cJSON::cJSON>()
+        }
+    }
 }
-pub unsafe extern "C" fn cJSON_Duplicate_rec(
-    mut item: *const crate::src::cJSON::cJSON,
+
+enum DuplicateResult {
+    Success(&'static mut crate::src::cJSON::cJSON),
+    Failure(Option<&'static mut crate::src::cJSON::cJSON>),
+}
+
+fn cJSON_Duplicate_rec(
+    item: &printable_cjson<'_>,
     mut depth: crate::__stddef_size_t_h::size_t,
     mut recurse: crate::src::cJSON::cJSON_bool,
-) -> *mut crate::src::cJSON::cJSON {
-    let mut c2rust_current_block: u64;
-    let mut newitem: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    let mut child: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    let mut next: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    let mut newchild: *mut crate::src::cJSON::cJSON =
-        ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-    if !item.is_null() {
-        newitem = cJSON_New_Item(&raw mut global_hooks);
-        if !newitem.is_null() {
-            (*newitem).type_0 = (*item).type_0 & !crate::src::cJSON::cJSON_IsReference;
-            (*newitem).valueint = (*item).valueint;
-            (*newitem).valuedouble = (*item).valuedouble;
-            if !(*item).valuestring.is_null() {
-                (*newitem).valuestring = cJSON_strdup(
-                    (*item).valuestring as *mut ::core::ffi::c_uchar,
-                    &raw mut global_hooks,
-                ) as *mut ::core::ffi::c_char;
-                if (*newitem).valuestring.is_null() {
-                    c2rust_current_block = 12988308604321106300;
-                } else {
-                    c2rust_current_block = 11812396948646013369;
-                }
-            } else {
-                c2rust_current_block = 11812396948646013369;
+) -> DuplicateResult {
+    let hooks = global_hooks_snapshot();
+
+    let Some(newitem_ref) = cJSON_New_Item(&hooks) else {
+        return DuplicateResult::Failure(None);
+    };
+
+    newitem_ref.type_0 = item.type_0 & !crate::src::cJSON::cJSON_IsReference;
+    newitem_ref.valueint = item.valueint;
+    newitem_ref.valuedouble = item.valuedouble;
+
+    let mut duplicated_children: Vec<&mut crate::src::cJSON::cJSON> = Vec::new();
+    let mut failed_child: Option<&mut crate::src::cJSON::cJSON> = None;
+    let duplicate_ok = 'duplicate: {
+        if let Some(value_string) = item.valuestring {
+            newitem_ref.valuestring = match cJSON_strdup(Some(value_string)) {
+                Some(copy) => copy.into_raw(),
+                None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+            };
+            if newitem_ref.valuestring.is_null() {
+                break 'duplicate false;
             }
-            match c2rust_current_block {
-                12988308604321106300 => {}
-                _ => {
-                    if !(*item).string.is_null() {
-                        (*newitem).string =
-                            if (*item).type_0 & crate::src::cJSON::cJSON_StringIsConst != 0 {
-                                (*item).string
-                            } else {
-                                cJSON_strdup(
-                                    (*item).string as *mut ::core::ffi::c_uchar,
-                                    &raw mut global_hooks,
-                                ) as *mut ::core::ffi::c_char
-                            };
-                        if (*newitem).string.is_null() {
-                            c2rust_current_block = 12988308604321106300;
-                        } else {
-                            c2rust_current_block = 12800627514080957624;
-                        }
-                    } else {
-                        c2rust_current_block = 12800627514080957624;
-                    }
-                    match c2rust_current_block {
-                        12988308604321106300 => {}
-                        _ => {
-                            if recurse == 0 {
-                                return newitem;
-                            }
-                            child = (*item).child as *mut crate::src::cJSON::cJSON;
-                            loop {
-                                if child.is_null() {
-                                    c2rust_current_block = 14763689060501151050;
-                                    break;
-                                }
-                                if depth
-                                    >= crate::src::cJSON::CJSON_CIRCULAR_LIMIT
-                                        as crate::__stddef_size_t_h::size_t
-                                {
-                                    c2rust_current_block = 12988308604321106300;
-                                    break;
-                                }
-                                newchild = cJSON_Duplicate_rec(
-                                    child,
-                                    depth.wrapping_add(1 as crate::__stddef_size_t_h::size_t),
-                                    true_0,
-                                );
-                                if newchild.is_null() {
-                                    c2rust_current_block = 12988308604321106300;
-                                    break;
-                                }
-                                if !next.is_null() {
-                                    (*next).next = newchild as *mut crate::src::cJSON::cJSON;
-                                    (*newchild).prev = next as *mut crate::src::cJSON::cJSON;
-                                    next = newchild;
-                                } else {
-                                    (*newitem).child = newchild as *mut crate::src::cJSON::cJSON;
-                                    next = newchild;
-                                }
-                                child = (*child).next as *mut crate::src::cJSON::cJSON;
-                            }
-                            match c2rust_current_block {
-                                12988308604321106300 => {}
-                                _ => {
-                                    if !newitem.is_null() && !(*newitem).child.is_null() {
-                                        (*(*newitem).child).prev =
-                                            newchild as *mut crate::src::cJSON::cJSON;
-                                    }
-                                    return newitem;
-                                }
-                            }
-                        }
-                    }
+        }
+
+        if let Some(item_string) = item.string {
+            newitem_ref.string = if item.type_0 & crate::src::cJSON::cJSON_StringIsConst != 0 {
+                item_string.as_ptr() as *mut ::core::ffi::c_char
+            } else {
+                match cJSON_strdup(Some(item_string)) {
+                    Some(copy) => copy.into_raw(),
+                    None => ::core::ptr::null_mut::<::core::ffi::c_char>(),
+                }
+            };
+            if newitem_ref.string.is_null() {
+                break 'duplicate false;
+            }
+        }
+
+        if recurse == 0 {
+            break 'duplicate true;
+        }
+
+        for child_ref in &item.children {
+            if depth >= crate::src::cJSON::CJSON_CIRCULAR_LIMIT as crate::__stddef_size_t_h::size_t
+            {
+                break 'duplicate false;
+            }
+
+            match cJSON_Duplicate_rec(
+                child_ref,
+                depth.wrapping_add(1 as crate::__stddef_size_t_h::size_t),
+                true_0,
+            ) {
+                DuplicateResult::Success(newchild_ref) => duplicated_children.push(newchild_ref),
+                DuplicateResult::Failure(partial_child) => {
+                    failed_child = partial_child;
+                    break 'duplicate false;
                 }
             }
         }
+
+        true
+    };
+
+    if let Some(failed_child) = failed_child {
+        duplicated_children.push(failed_child);
     }
-    if !newitem.is_null() {
-        cJSON_Delete(newitem);
+    assign_linked_children(newitem_ref, &mut duplicated_children);
+    if duplicate_ok {
+        return DuplicateResult::Success(newitem_ref);
     }
-    return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    return DuplicateResult::Failure(Some(newitem_ref));
 }
 #[export_name = "cJSON_Duplicate_rec"]
 
@@ -3657,316 +3438,250 @@ pub unsafe extern "C" fn cJSON_Duplicate_rec_ffi(
     mut depth: crate::__stddef_size_t_h::size_t,
     mut recurse: crate::src::cJSON::cJSON_bool,
 ) -> *mut crate::src::cJSON::cJSON {
-    cJSON_Duplicate_rec(item, depth, recurse)
+    let Some(item) = duplicate_tree_from_raw!(item, recurse, depth) else {
+        return ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
+    };
+    match cJSON_Duplicate_rec(&item, depth, recurse) {
+        DuplicateResult::Success(duplicate) => duplicate as *mut crate::src::cJSON::cJSON,
+        DuplicateResult::Failure(partial) => {
+            if let Some(partial) = partial {
+                cJSON_Delete_ffi(partial as *mut crate::src::cJSON::cJSON);
+            }
+            ::core::ptr::null_mut::<crate::src::cJSON::cJSON>()
+        }
+    }
 }
-unsafe extern "C" fn skip_oneline_comment(mut input: *mut *mut ::core::ffi::c_char) {
-    *input = (*input).offset(
-        (::core::mem::size_of::<[::core::ffi::c_char; 3]>() as usize)
-            .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-            as isize,
-    );
-    while *(*input).offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int != '\0' as i32 {
-        if *(*input).offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == '\n' as i32 {
-            *input = (*input).offset(
-                (::core::mem::size_of::<[::core::ffi::c_char; 2]>() as usize)
-                    .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-                    as isize,
-            );
+fn skip_oneline_comment(input: &mut usize, buffer: &[::core::ffi::c_char]) {
+    *input += 2;
+    while *input < buffer.len() && buffer[*input] != b'\0' as ::core::ffi::c_char {
+        if buffer[*input] == b'\n' as ::core::ffi::c_char {
+            *input += 1;
             return;
         }
-        *input = (*input).offset(1);
+        *input += 1;
     }
 }
 
-unsafe extern "C" fn skip_multiline_comment(mut input: *mut *mut ::core::ffi::c_char) {
-    *input = (*input).offset(
-        (::core::mem::size_of::<[::core::ffi::c_char; 3]>() as usize)
-            .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-            as isize,
-    );
-    while *(*input).offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int != '\0' as i32 {
-        if *(*input).offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == '*' as i32
-            && *(*input).offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                == '/' as i32
+fn skip_multiline_comment(input: &mut usize, buffer: &[::core::ffi::c_char]) {
+    *input += 2;
+    while *input < buffer.len() && buffer[*input] != b'\0' as ::core::ffi::c_char {
+        if buffer[*input] == b'*' as ::core::ffi::c_char
+            && buffer.get(*input + 1).copied() == Some(b'/' as ::core::ffi::c_char)
         {
-            *input = (*input).offset(
-                (::core::mem::size_of::<[::core::ffi::c_char; 3]>() as usize)
-                    .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-                    as isize,
-            );
+            *input += 2;
             return;
         }
-        *input = (*input).offset(1);
+        *input += 1;
     }
 }
 
-unsafe extern "C" fn minify_string(
-    mut input: *mut *mut ::core::ffi::c_char,
-    mut output: *mut *mut ::core::ffi::c_char,
-) {
-    *(*output).offset(0 as ::core::ffi::c_int as isize) =
-        *(*input).offset(0 as ::core::ffi::c_int as isize);
-    *input = (*input).offset(
-        (::core::mem::size_of::<[::core::ffi::c_char; 2]>() as usize)
-            .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-            as isize,
-    );
-    *output = (*output).offset(
-        (::core::mem::size_of::<[::core::ffi::c_char; 2]>() as usize)
-            .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-            as isize,
-    );
-    while *(*input).offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int != '\0' as i32 {
-        *(*output).offset(0 as ::core::ffi::c_int as isize) =
-            *(*input).offset(0 as ::core::ffi::c_int as isize);
-        if *(*input).offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int == '"' as i32 {
-            *(*output).offset(0 as ::core::ffi::c_int as isize) = '"' as i32 as ::core::ffi::c_char;
-            *input = (*input).offset(
-                (::core::mem::size_of::<[::core::ffi::c_char; 2]>() as usize)
-                    .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-                    as isize,
-            );
-            *output = (*output).offset(
-                (::core::mem::size_of::<[::core::ffi::c_char; 2]>() as usize)
-                    .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-                    as isize,
-            );
+fn minify_string(input: &mut usize, output: &mut usize, buffer: &mut [::core::ffi::c_char]) {
+    buffer[*output] = buffer[*input];
+    *input += 1;
+    *output += 1;
+    while *input < buffer.len() && buffer[*input] != b'\0' as ::core::ffi::c_char {
+        let current = buffer[*input];
+        buffer[*output] = current;
+        if current == b'"' as ::core::ffi::c_char {
+            *input += 1;
+            *output += 1;
             return;
-        } else if *(*input).offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-            == '\\' as i32
-            && *(*input).offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                == '"' as i32
+        } else if current == b'\\' as ::core::ffi::c_char
+            && buffer.get(*input + 1).copied() == Some(b'"' as ::core::ffi::c_char)
         {
-            *(*output).offset(1 as ::core::ffi::c_int as isize) =
-                *(*input).offset(1 as ::core::ffi::c_int as isize);
-            *input = (*input).offset(
-                (::core::mem::size_of::<[::core::ffi::c_char; 2]>() as usize)
-                    .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-                    as isize,
-            );
-            *output = (*output).offset(
-                (::core::mem::size_of::<[::core::ffi::c_char; 2]>() as usize)
-                    .wrapping_sub(::core::mem::size_of::<[::core::ffi::c_char; 1]>() as usize)
-                    as isize,
-            );
+            buffer[*output + 1] = buffer[*input + 1];
+            *input += 1;
+            *output += 1;
         }
-        *input = (*input).offset(1);
-        *output = (*output).offset(1);
+        *input += 1;
+        *output += 1;
     }
 }
-pub unsafe extern "C" fn cJSON_Minify(mut json: *mut ::core::ffi::c_char) {
-    let mut into: *mut ::core::ffi::c_char = json;
-    if json.is_null() {
-        return;
-    }
-    while *json.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int != '\0' as i32 {
-        match *json.offset(0 as ::core::ffi::c_int as isize) as ::core::ffi::c_int {
-            32 | 9 | 13 | 10 => {
-                json = json.offset(1);
+
+pub fn cJSON_Minify(json: &mut [::core::ffi::c_char]) {
+    let mut input: usize = 0;
+    let mut output: usize = 0;
+
+    while input < json.len() && json[input] != b'\0' as ::core::ffi::c_char {
+        let current = json[input];
+        if current == b' ' as ::core::ffi::c_char
+            || current == b'\t' as ::core::ffi::c_char
+            || current == b'\r' as ::core::ffi::c_char
+            || current == b'\n' as ::core::ffi::c_char
+        {
+            input += 1;
+        } else if current == b'/' as ::core::ffi::c_char {
+            if json.get(input + 1).copied() == Some(b'/' as ::core::ffi::c_char) {
+                skip_oneline_comment(&mut input, json);
+            } else if json.get(input + 1).copied() == Some(b'*' as ::core::ffi::c_char) {
+                skip_multiline_comment(&mut input, json);
+            } else {
+                input += 1;
             }
-            47 => {
-                if *json.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                    == '/' as i32
-                {
-                    skip_oneline_comment(&raw mut json);
-                } else if *json.offset(1 as ::core::ffi::c_int as isize) as ::core::ffi::c_int
-                    == '*' as i32
-                {
-                    skip_multiline_comment(&raw mut json);
-                } else {
-                    json = json.offset(1);
-                }
-            }
-            34 => {
-                minify_string(&raw mut json, &raw mut into);
-            }
-            _ => {
-                *into.offset(0 as ::core::ffi::c_int as isize) =
-                    *json.offset(0 as ::core::ffi::c_int as isize);
-                json = json.offset(1);
-                into = into.offset(1);
-            }
+        } else if current == b'"' as ::core::ffi::c_char {
+            minify_string(&mut input, &mut output, json);
+        } else {
+            json[output] = current;
+            input += 1;
+            output += 1;
         }
     }
-    *into = '\0' as i32 as ::core::ffi::c_char;
+    if output < json.len() {
+        json[output] = b'\0' as ::core::ffi::c_char;
+    }
 }
 #[export_name = "cJSON_Minify"]
 
 pub unsafe extern "C" fn cJSON_Minify_ffi(mut json: *mut ::core::ffi::c_char) {
-    cJSON_Minify(json)
-}
-pub unsafe extern "C" fn cJSON_IsInvalid(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
+    if json.is_null() {
+        return;
     }
-    return ((*item).type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_Invalid)
-        as ::core::ffi::c_int;
+    let length = unsafe { ::std::ffi::CStr::from_ptr(json).to_bytes_with_nul().len() };
+    let buffer = unsafe { ::core::slice::from_raw_parts_mut(json, length) };
+    cJSON_Minify(buffer)
+}
+fn cjson_has_type(
+    item: Option<&crate::src::cJSON::cJSON>,
+    type_0: ::core::ffi::c_int,
+) -> crate::src::cJSON::cJSON_bool {
+    return item
+        .map(|item| (item.type_0 & 0xff as ::core::ffi::c_int == type_0) as ::core::ffi::c_int)
+        .unwrap_or(false_0);
+}
+
+pub fn cJSON_IsInvalid(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return cjson_has_type(item, crate::src::cJSON::cJSON_Invalid);
 }
 #[export_name = "cJSON_IsInvalid"]
 
 pub unsafe extern "C" fn cJSON_IsInvalid_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsInvalid(item)
+    cJSON_IsInvalid(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_IsFalse(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
-    }
-    return ((*item).type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_False)
-        as ::core::ffi::c_int;
+pub fn cJSON_IsFalse(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return cjson_has_type(item, crate::src::cJSON::cJSON_False);
 }
 #[export_name = "cJSON_IsFalse"]
 
 pub unsafe extern "C" fn cJSON_IsFalse_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsFalse(item)
+    cJSON_IsFalse(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_IsTrue(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
-    }
-    return ((*item).type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_True)
-        as ::core::ffi::c_int;
+pub fn cJSON_IsTrue(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return cjson_has_type(item, crate::src::cJSON::cJSON_True);
 }
 #[export_name = "cJSON_IsTrue"]
 
 pub unsafe extern "C" fn cJSON_IsTrue_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsTrue(item)
+    cJSON_IsTrue(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_IsBool(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
-    }
-    return ((*item).type_0 & (crate::src::cJSON::cJSON_True | crate::src::cJSON::cJSON_False)
-        != 0 as ::core::ffi::c_int) as ::core::ffi::c_int;
+pub fn cJSON_IsBool(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return item
+        .map(|item| {
+            (item.type_0 & (crate::src::cJSON::cJSON_True | crate::src::cJSON::cJSON_False)
+                != 0 as ::core::ffi::c_int) as ::core::ffi::c_int
+        })
+        .unwrap_or(false_0);
 }
 #[export_name = "cJSON_IsBool"]
 
 pub unsafe extern "C" fn cJSON_IsBool_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsBool(item)
+    cJSON_IsBool(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_IsNull(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
-    }
-    return ((*item).type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_NULL)
-        as ::core::ffi::c_int;
+pub fn cJSON_IsNull(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return cjson_has_type(item, crate::src::cJSON::cJSON_NULL);
 }
 #[export_name = "cJSON_IsNull"]
 
 pub unsafe extern "C" fn cJSON_IsNull_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsNull(item)
+    cJSON_IsNull(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_IsNumber(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
-    }
-    return ((*item).type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_Number)
-        as ::core::ffi::c_int;
+pub fn cJSON_IsNumber(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return cjson_has_type(item, crate::src::cJSON::cJSON_Number);
 }
 #[export_name = "cJSON_IsNumber"]
 
 pub unsafe extern "C" fn cJSON_IsNumber_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsNumber(item)
+    cJSON_IsNumber(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_IsString(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
-    }
-    return ((*item).type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_String)
-        as ::core::ffi::c_int;
+pub fn cJSON_IsString(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return cjson_has_type(item, crate::src::cJSON::cJSON_String);
 }
 #[export_name = "cJSON_IsString"]
 
 pub unsafe extern "C" fn cJSON_IsString_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsString(item)
+    cJSON_IsString(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_IsArray(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
-    }
-    return ((*item).type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_Array)
-        as ::core::ffi::c_int;
+pub fn cJSON_IsArray(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return cjson_has_type(item, crate::src::cJSON::cJSON_Array);
 }
 #[export_name = "cJSON_IsArray"]
 
 pub unsafe extern "C" fn cJSON_IsArray_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsArray(item)
+    cJSON_IsArray(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_IsObject(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
-    }
-    return ((*item).type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_Object)
-        as ::core::ffi::c_int;
+pub fn cJSON_IsObject(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return cjson_has_type(item, crate::src::cJSON::cJSON_Object);
 }
 #[export_name = "cJSON_IsObject"]
 
 pub unsafe extern "C" fn cJSON_IsObject_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsObject(item)
+    cJSON_IsObject(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_IsRaw(
-    item: *const crate::src::cJSON::cJSON,
-) -> crate::src::cJSON::cJSON_bool {
-    if item.is_null() {
-        return false_0;
-    }
-    return ((*item).type_0 & 0xff as ::core::ffi::c_int == crate::src::cJSON::cJSON_Raw)
-        as ::core::ffi::c_int;
+pub fn cJSON_IsRaw(item: Option<&crate::src::cJSON::cJSON>) -> crate::src::cJSON::cJSON_bool {
+    return cjson_has_type(item, crate::src::cJSON::cJSON_Raw);
 }
 #[export_name = "cJSON_IsRaw"]
 
 pub unsafe extern "C" fn cJSON_IsRaw_ffi(
     item: *const crate::src::cJSON::cJSON,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_IsRaw(item)
+    cJSON_IsRaw(unsafe { item.as_ref() })
 }
-pub unsafe extern "C" fn cJSON_Compare(
-    a: *const crate::src::cJSON::cJSON,
-    b: *const crate::src::cJSON::cJSON,
+fn get_printable_object_item<'a, 'c>(
+    object: &'a printable_cjson<'c>,
+    name: Option<&::std::ffi::CStr>,
+    case_sensitive: crate::src::cJSON::cJSON_bool,
+) -> Option<&'a printable_cjson<'c>> {
+    let name = name?;
+    for element in &object.children {
+        match object_item_name_match(name, element.string, case_sensitive) {
+            Some(true) => return Some(element),
+            Some(false) => {}
+            None => break,
+        }
+    }
+    None
+}
+
+fn cJSON_Compare(
+    a: Option<&printable_cjson<'_>>,
+    b: Option<&printable_cjson<'_>>,
     case_sensitive: crate::src::cJSON::cJSON_bool,
 ) -> crate::src::cJSON::cJSON_bool {
-    if a.is_null()
-        || b.is_null()
-        || (*a).type_0 & 0xff as ::core::ffi::c_int != (*b).type_0 & 0xff as ::core::ffi::c_int
-    {
+    let (Some(a), Some(b)) = (a, b) else {
+        return false_0;
+    };
+    if a.type_0 & 0xff as ::core::ffi::c_int != b.type_0 & 0xff as ::core::ffi::c_int {
         return false_0;
     }
-    match (*a).type_0 & 0xff as ::core::ffi::c_int {
+    match a.type_0 & 0xff as ::core::ffi::c_int {
         crate::src::cJSON::cJSON_False
         | crate::src::cJSON::cJSON_True
         | crate::src::cJSON::cJSON_NULL
@@ -3977,80 +3692,62 @@ pub unsafe extern "C" fn cJSON_Compare(
         | crate::src::cJSON::cJSON_Object => {}
         _ => return false_0,
     }
-    if a == b {
+    if ::core::ptr::eq(a, b) {
         return true_0;
     }
-    match (*a).type_0 & 0xff as ::core::ffi::c_int {
+    match a.type_0 & 0xff as ::core::ffi::c_int {
         crate::src::cJSON::cJSON_False
         | crate::src::cJSON::cJSON_True
         | crate::src::cJSON::cJSON_NULL => return true_0,
         crate::src::cJSON::cJSON_Number => {
-            if compare_double((*a).valuedouble, (*b).valuedouble) != 0 {
+            if compare_double(a.valuedouble, b.valuedouble) != 0 {
                 return true_0;
             }
             return false_0;
         }
         crate::src::cJSON::cJSON_String | crate::src::cJSON::cJSON_Raw => {
-            if (*a).valuestring.is_null() || (*b).valuestring.is_null() {
+            let (Some(a_string), Some(b_string)) = (a.valuestring, b.valuestring) else {
                 return false_0;
-            }
-            if crate::stdlib::strcmp((*a).valuestring, (*b).valuestring) == 0 as ::core::ffi::c_int
-            {
+            };
+            if a_string == b_string {
                 return true_0;
             }
             return false_0;
         }
         crate::src::cJSON::cJSON_Array => {
-            let mut a_element: *mut crate::src::cJSON::cJSON =
-                (*a).child as *mut crate::src::cJSON::cJSON;
-            let mut b_element: *mut crate::src::cJSON::cJSON =
-                (*b).child as *mut crate::src::cJSON::cJSON;
-            while !a_element.is_null() && !b_element.is_null() {
-                if cJSON_Compare(a_element, b_element, case_sensitive) == 0 {
-                    return false_0;
+            let mut a_element = a.children.iter();
+            let mut b_element = b.children.iter();
+            loop {
+                match (a_element.next(), b_element.next()) {
+                    (Some(a_ref), Some(b_ref)) => {
+                        if cJSON_Compare(Some(a_ref), Some(b_ref), case_sensitive) == 0 {
+                            return false_0;
+                        }
+                    }
+                    (None, None) => return true_0,
+                    _ => return false_0,
                 }
-                a_element = (*a_element).next as *mut crate::src::cJSON::cJSON;
-                b_element = (*b_element).next as *mut crate::src::cJSON::cJSON;
             }
-            if a_element != b_element {
-                return false_0;
-            }
-            return true_0;
         }
         crate::src::cJSON::cJSON_Object => {
-            let mut a_element_0: *mut crate::src::cJSON::cJSON =
-                ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-            let mut b_element_0: *mut crate::src::cJSON::cJSON =
-                ::core::ptr::null_mut::<crate::src::cJSON::cJSON>();
-            a_element_0 = (if !a.is_null() {
-                (*a).child
-            } else {
-                ::core::ptr::null_mut::<crate::src::cJSON::cJSON>()
-            }) as *mut crate::src::cJSON::cJSON;
-            while !a_element_0.is_null() {
-                b_element_0 = get_object_item(b, (*a_element_0).string, case_sensitive);
-                if b_element_0.is_null() {
+            for a_ref in &a.children {
+                let b_element_0 = get_printable_object_item(b, a_ref.string, case_sensitive);
+                let Some(b_ptr) = b_element_0 else {
+                    return false_0;
+                };
+                let b_ref = b_ptr;
+                if cJSON_Compare(Some(a_ref), Some(b_ref), case_sensitive) == 0 {
                     return false_0;
                 }
-                if cJSON_Compare(a_element_0, b_element_0, case_sensitive) == 0 {
-                    return false_0;
-                }
-                a_element_0 = (*a_element_0).next as *mut crate::src::cJSON::cJSON;
             }
-            b_element_0 = (if !b.is_null() {
-                (*b).child
-            } else {
-                ::core::ptr::null_mut::<crate::src::cJSON::cJSON>()
-            }) as *mut crate::src::cJSON::cJSON;
-            while !b_element_0.is_null() {
-                a_element_0 = get_object_item(a, (*b_element_0).string, case_sensitive);
-                if a_element_0.is_null() {
+            for b_ref in &b.children {
+                let a_element_1 = get_printable_object_item(a, b_ref.string, case_sensitive);
+                let Some(a_ref) = a_element_1 else {
+                    return false_0;
+                };
+                if cJSON_Compare(Some(b_ref), Some(a_ref), case_sensitive) == 0 {
                     return false_0;
                 }
-                if cJSON_Compare(b_element_0, a_element_0, case_sensitive) == 0 {
-                    return false_0;
-                }
-                b_element_0 = (*b_element_0).next as *mut crate::src::cJSON::cJSON;
             }
             return true_0;
         }
@@ -4064,26 +3761,47 @@ pub unsafe extern "C" fn cJSON_Compare_ffi(
     b: *const crate::src::cJSON::cJSON,
     case_sensitive: crate::src::cJSON::cJSON_bool,
 ) -> crate::src::cJSON::cJSON_bool {
-    cJSON_Compare(a, b, case_sensitive)
-}
-pub unsafe extern "C" fn cJSON_malloc(
-    mut size: crate::__stddef_size_t_h::size_t,
-) -> *mut ::core::ffi::c_void {
-    return global_hooks.allocate.expect("non-null function pointer")(size);
+    let (Some(a_ref), Some(b_ref)) = (unsafe { a.as_ref() }, unsafe { b.as_ref() }) else {
+        return false_0;
+    };
+    if a_ref.type_0 & 0xff as ::core::ffi::c_int != b_ref.type_0 & 0xff as ::core::ffi::c_int {
+        return false_0;
+    }
+    match a_ref.type_0 & 0xff as ::core::ffi::c_int {
+        crate::src::cJSON::cJSON_False
+        | crate::src::cJSON::cJSON_True
+        | crate::src::cJSON::cJSON_NULL
+        | crate::src::cJSON::cJSON_Number
+        | crate::src::cJSON::cJSON_String
+        | crate::src::cJSON::cJSON_Raw
+        | crate::src::cJSON::cJSON_Array
+        | crate::src::cJSON::cJSON_Object => {}
+        _ => return false_0,
+    }
+    if a == b {
+        return true_0;
+    }
+    let Some(a_item) = printable_tree_from_raw!(a) else {
+        return false_0;
+    };
+    let Some(b_item) = printable_tree_from_raw!(b) else {
+        return false_0;
+    };
+    cJSON_Compare(Some(&a_item), Some(&b_item), case_sensitive)
 }
 #[export_name = "cJSON_malloc"]
 
 pub unsafe extern "C" fn cJSON_malloc_ffi(
     mut size: crate::__stddef_size_t_h::size_t,
 ) -> *mut ::core::ffi::c_void {
-    cJSON_malloc(size)
-}
-pub unsafe extern "C" fn cJSON_free(mut object: *mut ::core::ffi::c_void) {
-    global_hooks.deallocate.expect("non-null function pointer")(object);
-    object = crate::__stddef_null_h::NULL;
+    return global_hooks_snapshot()
+        .allocate
+        .expect("non-null function pointer")(size);
 }
 #[export_name = "cJSON_free"]
 
 pub unsafe extern "C" fn cJSON_free_ffi(mut object: *mut ::core::ffi::c_void) {
-    cJSON_free(object)
+    global_hooks_snapshot()
+        .deallocate
+        .expect("non-null function pointer")(object);
 }
