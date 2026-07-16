@@ -2,18 +2,18 @@
 
 This summary was generated from CRISP's MVIR through `crisp safety-history`. Each row is one completed `CodexAgentOpNode`: the final edit returned by an agent invocation, rather than intermediate edits attempted within that turn.
 
-- Total accepted edits: 110
+- Total accepted edits: 123
 - Total rejected edits: 0
-- Total tokens used: 5,934,305
-- Mean tokens per completed CRISP-level row: 53,948
-- Median tokens per completed CRISP-level row: 51,846.0
-- Total agent runtime: 2:41:40
+- Total tokens used: 6,955,185
+- Mean tokens per completed CRISP-level row: 56,546
+- Median tokens per completed CRISP-level row: 55,357
+- Total agent runtime: 3:14:55
 - Initial unsafe count: 1,359
-- Final unsafe count: 42
-- Net unsafe operations removed by accepted edits: 1,317
-- Average unsafe delta per completed CRISP-level row, including rejected rows: mean `-11.97`, median `-4`
-- Agent-internal `cargo check-unsafe2` runs reporting increases: 28
-- Last processed MVIR agent operation: `2cfc6b75d1469c290c0ef0a7f0e839f1250415596ee8aa2f99d8bdb76b2325a2`
+- Final unsafe count: 0
+- Net unsafe operations removed by accepted edits: 1,359
+- Average unsafe delta per completed CRISP-level row, including rejected rows: mean `-11.05`, median `-4`
+- Agent-internal `cargo check-unsafe2` runs reporting increases: 33
+- Last processed MVIR agent operation: `81fe9dc3b2b3fe3ad56bf680d5a0af6df473e8030abaadc08c64ebe64a66f6be`
 
 Every stored CRISP-level test result for these completed rows has exit code 0.
 
@@ -131,3 +131,16 @@ Every stored CRISP-level test result for these completed rows has exit code 0.
 | 108 | `bf13057a9708`<br>2026-07-15 17:11:24 | 1:23 | 42 | -2 | 49,915 | Replaced unsafe `print_string_ptr` with safe `print_string(&[u8], ...)` in `rust/src/cJSON.rs:740`. Preserved null string behavior while decoding raw fields at the existing printer traversal boundaries in `rust/src/cJSON.rs:1058` and `rust/src/cJSON.rs:1340`. | accepted |
 | 109 | `c8f5303cba3c`<br>2026-07-15 17:13:54 | 2:19 | 42 | 0 | 73,225 | No Rust source change was retained: the scoped `parse_string` refactor cannot be made safe independently without bypassing cJSON’s configurable allocator hooks. Confirmed `valuestring` is part of the public C layout, so it must remain an ABI-visible pointer mirror. | accepted |
 | 110 | `2cfc6b75d146`<br>2026-07-15 17:16:34 | 2:31 | 42 | 0 | 84,960 | Migrated `cJSON` node storage to `Box<cJSON>` through the existing FFI constructor/destructor paths: `rust/src/cJSON.rs:43`, `rust/src/cJSON.rs:398`, `rust/src/cJSON.rs:1949`. Preserved configured allocator failure behavior by probing allocation hooks before node creation. | accepted |
+| 111 | `9b9e9608fe17`<br>2026-07-15 17:51:47 | 3:17 | 34 | -8 | 116,077 | Migrated owned cJSON value strings and keys to safe `Vec<u8>` backing in a mutex-protected side table, preserving the public `cJSON` ABI and pointer mirrors. `rust/src/cJSON.rs:58` Replaced unsafe string duplication/copying with safe byte-vector helpers while retaining hook allocation-failure behavior. | accepted |
+| 112 | `9fc9e173e2c6`<br>2026-07-15 17:54:28 | 2:30 | 34 | 0 | 73,811 | No Rust source change retained: the attempted safe print wrapper caused `check-unsafe2` failures by adding unsafe calls inside closures, so it was reverted. | accepted |
+| 113 | `e3f1da3edeb5`<br>2026-07-15 17:56:48 | 2:12 | 20 | -14 | 78,713 | Migrated printing to an owned, flat safe snapshot graph in `rust/src/cJSON.rs:1010`. Kept raw-pointer conversion/traversal inside the four exported print adapters; formatter helpers are now safe (`rust/src/cJSON.rs:1102`, `rust/src/cJSON.rs:1251`). Updated number rendering to accept plain numeric values rather than `cJSON` references. | accepted |
+| 114 | `a1453362052c`<br>2026-07-15 17:58:49 | 1:50 | 20 | 0 | 65,191 | Refactored lookup traversal into safe `lookup_document` helpers using `&cJSON` and owned key `Vec<u8>` snapshots in `rust/src/cJSON.rs:1020`. Migrated array sizing/indexing and object lookup matching out of raw-pointer loops; FFI adapters retain only pointer/C-string conversion in `rust/src/cJSON.rs:1616`. | accepted |
+| 115 | `5c6e57ce1c8b`<br>2026-07-15 18:00:57 | 1:47 | 20 | 0 | 63,779 | Replaced raw recursive comparison with safe, owned comparison documents in `rust/src/cJSON.rs:1015`. Added an iterative FFI snapshot adapter at `rust/src/cJSON.rs:1311`; `cJSON_Compare_ffi` now only converts inputs and dispatches safely at `rust/src/cJSON.rs:2889`. Preserved comparison behavior for types, numbers, strings/raw values, arrays, objects, and case sensitivity. | accepted |
+| 116 | `416323a1aeb8`<br>2026-07-15 18:02:45 | 1:38 | 20 | 0 | 57,325 | Refactored `cJSON_Delete_ffi` to convert each FFI raw node to `Box<cJSON>` before accessing fields in `rust/src/cJSON.rs:468`. Removed raw-pointer dereferences and explicit `drop(Box::from_raw(...))` from the deletion loop. Preserved child/reference deletion order and avoided introducing allocation during deletion. | accepted |
+| 117 | `0fe9cc85fc17`<br>2026-07-15 18:07:10 | 4:14 | 7 | -13 | 99,491 | Replaced the non-FFI unsafe parser functions with safe `Vec<Box<cJSON>>` tree parsing and index-based child ownership in `rust/src/cJSON.rs:1524`. Moved raw cJSON link construction and `Box::into_raw` conversion to the exported parse adapter at `rust/src/cJSON.rs:895`. Preserved owned-string cleanup on parse failures and C-compatible linked output on success. | accepted |
+| 118 | `e6459da23a38`<br>2026-07-15 18:09:54 | 2:32 | 7 | 0 | 85,162 | Removed the raw reference-to-pointer cast in the owned-string registry key helper, using safe address extraction in `rust/src/cJSON.rs:68`. | accepted |
+| 119 | `7436dae8146d`<br>2026-07-15 18:12:20 | 2:15 | 3 | -4 | 96,278 | Replaced direct `parsed_tree` indexing with checked accessors in `parse_value`, `parse_array`, and `parse_object`; an invalid internal index now returns the existing parse-failure value rather than panicking. `rust/src/cJSON.rs:1551` Added safe child-link insertion through `Vec::get_mut`. | accepted |
+| 120 | `c9357964b7ef`<br>2026-07-15 18:14:45 | 2:15 | 3 | 0 | 75,426 | No production Rust change was retained: safe error snapshots changed the observable `cJSON_GetErrorPtr` pointer identity. | accepted |
+| 121 | `d4da29abe278`<br>2026-07-15 18:16:32 | 1:38 | 3 | 0 | 58,509 | No Rust source changes remain: replacing its `format!` calls with `fmt::write` left `cargo check-unsafe2`’s three findings unchanged. Preserved behavior because `print_number` requires cJSON’s exact 15/17-significant-digit output; `f64::to_string` would alter tested output. | accepted |
+| 122 | `1a411587dc36`<br>2026-07-15 18:18:02 | 1:22 | 3 | 0 | 55,623 | Removed the unused raw `reallocate` callback from core `internal_hooks` state in `rust/src/cJSON.rs:203`. Deleted all initialization and reset logic for that never-invoked callback, preserving active allocation/deallocation hook behavior. | accepted |
+| 123 | `81fe9dc3b2b3`<br>2026-07-15 18:23:59 | 5:45 | 0 | -3 | 95,495 | Replaced unsafe-adjacent number formatting with safe, exact IEEE-754 decimal rendering in `rust/src/cJSON.rs:601`. Preserves cJSON’s 15-digit recoverability check, 17-digit fallback, `%g` exponent spelling, and non-finite handling in `rust/src/cJSON.rs:778`. Added safe owned big-integer support via `num-bigint` in `rust/Cargo.toml:14`; lockfile updated. | accepted |
