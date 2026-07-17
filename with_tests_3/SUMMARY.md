@@ -1,26 +1,32 @@
 # with_tests_3 CRISP run summary
 
 This summary covers the completed CRISP-level safety-loop edits in
-`run_20260716_112439.log`, `run_20260716_121519.log`, and
-`run_20260716_123825.log`. Each row is the final edit returned by one agent
-invocation, rather than its intermediate sandbox attempts.
+`run_20260716_112439.log`, `run_20260716_121519.log`,
+`run_20260716_123825.log`, and `run_20260716_215926.log`. Each row is the final
+edit returned by one agent invocation, rather than its intermediate sandbox
+attempts.
 
-- Total accepted edits: 76
+- Total accepted edits: 82
 - Total rejected edits: 1
-- Total tokens used: 5,213,747
-- Mean tokens per completed CRISP-level row: 67,711
+- Total tokens used: 5,595,461
+- Mean tokens per completed CRISP-level row: 67,415.2
 - Median tokens per completed CRISP-level row: 62,773
-- Total completed-step runtime: 1:50:07
+- Total completed-step runtime: 1:59:39
 - Initial unsafe count: 1,359
-- Final unsafe count: 63
-- Net unsafe operations removed by accepted edits: 1,296
-- Average unsafe delta per completed CRISP-level row: mean `-16.8`, median `-6`
+- Final unsafe count: 60
+- Net unsafe operations removed by accepted edits: 1,299
+- Average unsafe delta per completed CRISP-level row: mean `-15.7`, median `-6`
 - Omitted from the table: the block beginning at
   `run_20260716_112439.log:24837` did not launch an agent or return an edit;
   CRISP exited immediately because all five configured safety tries had been
   consumed. The same applies to the block at
   `run_20260716_121519.log:25202` after the second invocation consumed its five
-  safety tries. The third log had no incomplete agent blocks.
+  safety tries. The third log had no incomplete agent blocks. The seventh
+  agent block in `run_20260716_215926.log`, beginning at line 36651, returned
+  final prose after 11:51 and 104,475 tokens but never returned an edit to
+  CRISP: Docker reported that its exec instance no longer existed. Its
+  proposed printer rewrite, duration, and tokens are therefore omitted from
+  the completed-row table and aggregates.
 
 Nine of the ten returned edits were accepted. Row 7 passed the agent-side
 checker and all tests but was rejected by CRISP's final comparison because
@@ -67,6 +73,17 @@ CRISP therefore stopped under its configured five-consecutive-failures
 rule. The final code passed all 18 translated tests and the final safety
 comparison; this was a no-progress termination, not a build, test, checker, or
 agent execution failure.
+
+The fourth log contains six completed and accepted CRISP-level rows. Its only
+count-reducing edit made `parse_value` safe-reference based and lowered the
+count from 63 to 60; the other five rows changed planning or implementation
+structure without reducing the checker metric. A seventh agent invocation
+reported that it had converted the active printer to owned `Vec<u8>` output,
+and its sandbox checks and all 18 tests passed. Before CRISP could collect the
+result, however, `exec_inspect` failed with Docker API status 404 (`No such
+exec instance`). Consequently CRISP never imported, independently tested, or
+safety-compared that edit. The durable completed state from this log remains
+60 unsafe findings; the log has no normal final test/count footer.
 
 | # | Log start | Duration | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---:|---|---|
@@ -147,3 +164,9 @@ agent execution failure.
 | 75 | `run_20260716_123825.log:362784` | 1:52 | 63 | +0 | 81,009 | No Rust change was retained: the next smallest candidate (`parse_string`) cannot be made safe without either raw writes to hook-allocated C memory or a checker-rejected foreign copy call. | accepted |
 | 76 | `run_20260716_123825.log:366684` | 1:08 | 63 | +0 | 62,773 | No behavior-changing Rust edit was safe to make this iteration. | accepted |
 | 77 | `run_20260716_123825.log:370272` | 3:40 | 63 | +0 | 103,114 | Refactored the internal node allocator to return `Option<NonNull<cJSON>>`, converting to raw/null pointers only at existing C-facing boundaries. Also removed the obsolete raw-reference feature gate. | accepted |
+| 78 | `run_20260716_215926.log:25` | 1:21 | 63 | +0 | 69,887 | Recorded that the remaining helpers depend on the public raw `cJSON` layout and observable custom allocator behavior; no Rust code changed. | accepted |
+| 79 | `run_20260716_215926.log:3605` | 1:45 | 60 | -3 | 68,932 | Refactored `parse_value` to take safe-reference inputs and confined its two legacy parser calls to array/object dispatch branches. | accepted |
+| 80 | `run_20260716_215926.log:7806` | 1:51 | 60 | +0 | 53,803 | Audited the remaining C-visible node/string and custom-allocation constraints and updated the safety plan; no Rust code changed. | accepted |
+| 81 | `run_20260716_215926.log:10108` | 1:51 | 60 | +0 | 58,478 | Reconfirmed that the eight remaining parser/printer helpers form a public-layout and allocator compatibility cluster; no Rust code changed. | accepted |
+| 82 | `run_20260716_215926.log:13178` | 0:58 | 60 | +0 | 40,705 | Recorded the exact eight non-FFI helpers remaining in the compatibility cluster; no Rust code changed. | accepted |
+| 83 | `run_20260716_215926.log:15067` | 1:46 | 60 | +0 | 89,909 | Investigated printer-boundary alternatives, reverted checker-increasing attempts, and documented the confirmed raw-string and hook-buffer constraints. | accepted |
