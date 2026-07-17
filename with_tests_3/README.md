@@ -1,1 +1,2 @@
-More validation of the `git init` logic in CRISP.
+- More validation of the `git init` logic in CRISP.
+- gpt-5.6-terra
