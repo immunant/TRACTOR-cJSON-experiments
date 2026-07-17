@@ -1,0 +1,21 @@
+code size = 3102
+default limits = FuelLimits(safety_tries=45, max_consecutive_failures=5, safety_tries_per_target=3)
+limits = FuelLimits(safety_tries=100, max_consecutive_failures=5, safety_tries_per_target=3)
+Traceback (most recent call last):
+  File "/home/legare/cJSON_lib/Tractor-Crisp/.venv/bin/crisp", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/legare/cJSON_lib/Tractor-Crisp/crisp/__main__.py", line 752, in main
+    do_safety_loop(args, cfg)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/legare/cJSON_lib/Tractor-Crisp/crisp/__main__.py", line 561, in do_safety_loop
+    safety_loop_common(args, cfg, mvir, w, n_code, n_c_code)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/legare/cJSON_lib/Tractor-Crisp/crisp/__main__.py", line 374, in safety_loop_common
+    n_plans = prior_agent_plans(mvir, n_code) or TreeNode.new(mvir, files={})
+              ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/legare/cJSON_lib/Tractor-Crisp/crisp/__main__.py", line 294, in prior_agent_plans
+    raise CrispError(
+    ...<2 lines>...
+    )
+crisp.error.CrispError: multiple Codex agent ops produced code node 43cf044a94992800291a8455ae20d538944a054fe9606856ec73f1b372ccc3cc: 2bc06877123e07cc5f5eca92087681fb9a99024930b3867331795c708455a25b, 1dcbf4f9f361edae04b7ad51b91c7a84afa404566e00ca88a6f4d6b81fb85466, 073165d1242a3134bdb5a930b2e0fd3266c20e42dd6f12a3024321fefd0db180, 8598bd1975c171715bbe9aa626932580ce3421ecc72ca05019f5738939a9933d, 4a347686a89d71c280d5703769abfbdb3bbb129cd0a932de5789dd9322533b43

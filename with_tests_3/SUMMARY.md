@@ -2,20 +2,20 @@
 
 This summary covers the completed CRISP-level safety-loop edits in
 `run_20260716_112439.log`, `run_20260716_121519.log`,
-`run_20260716_123825.log`, and `run_20260716_215926.log`. Each row is the final
-edit returned by one agent invocation, rather than its intermediate sandbox
-attempts.
+`run_20260716_123825.log`, `run_20260716_215926.log`, and
+`run_20260717_101250.log`. Each row is the final edit returned by one agent
+invocation, rather than its intermediate sandbox attempts.
 
-- Total accepted edits: 82
+- Total accepted edits: 92
 - Total rejected edits: 1
-- Total tokens used: 5,595,461
-- Mean tokens per completed CRISP-level row: 67,415.2
-- Median tokens per completed CRISP-level row: 62,773
-- Total completed-step runtime: 1:59:39
+- Total tokens used: 6,334,206
+- Mean tokens per completed CRISP-level row: 68,109.7
+- Median tokens per completed CRISP-level row: 63,322
+- Total completed-step runtime: 2:15:33
 - Initial unsafe count: 1,359
-- Final unsafe count: 60
-- Net unsafe operations removed by accepted edits: 1,299
-- Average unsafe delta per completed CRISP-level row: mean `-15.7`, median `-6`
+- Final unsafe count: 0
+- Net unsafe operations removed by accepted edits: 1,359
+- Average unsafe delta per completed CRISP-level row: mean `-14.6`, median `-5`
 - Omitted from the table: the block beginning at
   `run_20260716_112439.log:24837` did not launch an agent or return an edit;
   CRISP exited immediately because all five configured safety tries had been
@@ -26,7 +26,10 @@ attempts.
   final prose after 11:51 and 104,475 tokens but never returned an edit to
   CRISP: Docker reported that its exec instance no longer existed. Its
   proposed printer rewrite, duration, and tokens are therefore omitted from
-  the completed-row table and aggregates.
+  the completed-row table and aggregates. The startup-only logs
+  `run_20260717_093548.log` and `run_20260717_093602.log` are also omitted:
+  both exited before launching an agent because resume logic found multiple
+  valid planning-file producers for the same current code node.
 
 Nine of the ten returned edits were accepted. Row 7 passed the agent-side
 checker and all tests but was rejected by CRISP's final comparison because
@@ -84,6 +87,20 @@ result, however, `exec_inspect` failed with Docker API status 404 (`No such
 exec instance`). Consequently CRISP never imported, independently tested, or
 safety-compared that edit. The durable completed state from this log remains
 60 unsafe findings; the log has no normal final test/count footer.
+
+The fifth completed log resumed successfully after the planning-history lookup
+was changed to select the newest matching Codex operation. It contains ten
+accepted rows and reduces the unsafe count from 60 to 0 in 15:54. After four
+initial plan-only or reverted attempts, a `parse_string` cleanup removed one
+finding and a safe string-printer boundary removed three. Two further
+no-progress audits were followed by the decisive migrations: an owned
+`PrintableValue` snapshot and `Vec` renderer removed 41 printer findings, then
+an owned `ParsedValue` tree with C-node materialization confined to the export
+boundary removed the final 15 parser findings. The agent ran
+`cargo check-unsafe2` 29 times; seven intermediate attempts reported increases
+and were revised before return. The final CRISP comparison passed, all 18
+translated tests passed, and the normal footer reports unsafe count 0 and test
+exit code 0.
 
 | # | Log start | Duration | Unsafe count | Delta | Tokens used | Final edit summary | Result |
 |---:|---|---:|---:|---:|---:|---|---|
@@ -170,3 +187,13 @@ safety-compared that edit. The durable completed state from this log remains
 | 81 | `run_20260716_215926.log:10108` | 1:51 | 60 | +0 | 58,478 | Reconfirmed that the eight remaining parser/printer helpers form a public-layout and allocator compatibility cluster; no Rust code changed. | accepted |
 | 82 | `run_20260716_215926.log:13178` | 0:58 | 60 | +0 | 40,705 | Recorded the exact eight non-FFI helpers remaining in the compatibility cluster; no Rust code changed. | accepted |
 | 83 | `run_20260716_215926.log:15067` | 1:46 | 60 | +0 | 89,909 | Investigated printer-boundary alternatives, reverted checker-increasing attempts, and documented the confirmed raw-string and hook-buffer constraints. | accepted |
+| 84 | `run_20260717_101250.log:25` | 1:11 | 60 | +0 | 61,886 | Reconfirmed the public-layout and allocator blocker across the eight remaining parser/printer helpers; no Rust code changed. | accepted |
+| 85 | `run_20260717_101250.log:4239` | 0:29 | 60 | +0 | 47,236 | Recorded the direct C struct access and custom-allocation constraints in the safety plan; no Rust code changed. | accepted |
+| 86 | `run_20260717_101250.log:5614` | 0:39 | 60 | +0 | 51,959 | Tried a `parse_string` migration, reverted its checker-increasing C-copy calls, and documented the constraint. | accepted |
+| 87 | `run_20260717_101250.log:7784` | 1:16 | 60 | +0 | 67,791 | Tried a `NonNull`/`memcpy` migration that passed tests but increased unsafe-adjacent findings, then reverted it. | accepted |
+| 88 | `run_20260717_101250.log:11518` | 3:07 | 59 | -1 | 94,721 | Removed `parse_string`'s unsafe raw-slice conversion by building a NUL-terminated decoded `Vec` and using the existing allocation/copy path. | accepted |
+| 89 | `run_20260717_101250.log:20223` | 2:23 | 56 | -3 | 96,836 | Replaced raw `print_string_ptr` with a safe `Option<&CStr>` string printer and extended the existing buffer append path. | accepted |
+| 90 | `run_20260717_101250.log:27571` | 1:12 | 56 | +0 | 74,988 | Audited the five remaining parser/printer helpers and updated the public-layout compatibility blocker; no Rust code changed. | accepted |
+| 91 | `run_20260717_101250.log:30785` | 0:23 | 56 | +0 | 52,084 | Reconfirmed that all remaining findings traversed C-visible raw-pointer fields; no Rust code changed. | accepted |
+| 92 | `run_20260717_101250.log:32627` | 2:48 | 15 | -41 | 101,376 | Reworked printing around an owned `PrintableValue` snapshot with `Vec` rendering, confining raw C-node traversal to exported print entry points. | accepted |
+| 93 | `run_20260717_101250.log:53590` | 2:26 | 0 | -15 | 89,868 | Reworked parsing around an owned `ParsedValue` tree with `Vec` children, confining C-node materialization to the exported parse boundary. | accepted |
